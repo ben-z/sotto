@@ -21,6 +21,14 @@ Local equivalent (creates files but does not publish):
 scripts/release.sh --adhoc
 ```
 
+If GitHub does not deliver the release event, trigger the same CI build for an existing published tag:
+
+```sh
+gh workflow run release.yml -f tag=v0.1.5
+```
+
+Both testing and packaging check out the requested tag. Existing assets are never overwritten; a failed upload must be investigated before retrying.
+
 ## Optional Developer ID signing and notarization
 
 Set the repository Actions variable `SOTTO_NOTARIZE` to exactly `true` to request notarized releases. The default is `false`. An invalid value fails. There is **no fallback** if notarization was requested but credentials are missing or Apple rejects the submission.
