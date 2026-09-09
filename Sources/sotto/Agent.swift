@@ -8,6 +8,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     private(set) var session: Session
     private var settingsWindow: SettingsWindow?
     private var hotkey: Hotkey?
+    private var artwork: SottoStatusArtwork?
     private var item: NSStatusItem?
     private let indicator = RecordingIndicator()
     private var signals: [DispatchSourceSignal] = []
@@ -30,6 +31,8 @@ final class Agent: NSObject, NSApplicationDelegate {
                 if pressed { self.toggle() }
                 else if self.session.configuration.hotkeyMode == "hold" { Task { await self.session.finish() } }
             }
+            guard let resources = Bundle.main.resourceURL else { throw SottoError("Sotto app resources are missing.") }
+            artwork = try SottoStatusArtwork(resourceDirectory: resources.appendingPathComponent("SottoStatus"))
             item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             let menu = NSMenu()
             for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Open Recordings", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("Quit", #selector(quit))] {
@@ -119,8 +122,11 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     private func update() {
-        let symbols: [Session.State: String] = [.idle: "mic", .preparing: "ellipsis", .recording: "record.circle.fill", .transcribing: "arrow.up.circle", .error: "exclamationmark.triangle"]
-        item?.button?.image = NSImage(systemSymbolName: symbols[session.state]!, accessibilityDescription: "Sotto \(session.state.rawValue)")
+        if let item {
+            artwork?.apply(SottoStatusArtwork.State(rawValue: session.state.rawValue)!, to: item)
+            item.button?.imagePosition = .imageLeading
+            item.button?.setAccessibilityValue(session.message)
+        }
         item?.button?.toolTip = session.message
         item?.button?.title = session.state == .recording ? " REC" : ""
         indicator.update(session.state)
