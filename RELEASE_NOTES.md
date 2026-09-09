@@ -1,10 +1,7 @@
-Sotto v0.1.4 makes the recording indicator easier to learn and settings easier to change.
+Sotto v0.1.5 refines the wording for update settings.
 
-- README now shows the real recording/transcription indicator, an enlarged state guide, and a native Settings screenshot.
-- Clearer first-launch, recording, and manual-upgrade instructions; removed stale version and app-size claims.
-- Missing Accessibility permission no longer blocks saving unrelated settings, such as automatic update checks. Enabling auto-paste still checks permission, and recording still reports missing permission clearly.
-
-Automatic update checks remain quiet: enabled at launch and daily, with update availability inside the Sotto menu. Download and installation are manual.
+- The setting is labeled **Check for updates automatically**.
+- README text and the Settings screenshot match the updated wording.
 
 Download the universal ZIP below for Apple silicon and Intel Macs running macOS 14+. Quit Sotto, replace the app in the same location, and reopen it. Existing settings, recordings, and your Groq key are preserved.
 
