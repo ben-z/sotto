@@ -13,7 +13,14 @@ public struct TranscriptionResult: Sendable {
 }
 
 public struct GroqClient: Sendable {
-    public init() {}
+    private let transcriptionEndpoint: URL
+    public init() {
+        transcriptionEndpoint = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
+    }
+
+    // Internal test seam: production callers always use Groq's HTTPS endpoint.
+    init(transcriptionEndpoint: URL) { self.transcriptionEndpoint = transcriptionEndpoint }
+
 
     /// Authenticated, read-only check. This does not prove inference quota or
     /// microphone/transcription operation; the UI states that distinction.
@@ -58,7 +65,7 @@ public struct GroqClient: Sendable {
         if let language { fields.append(("language", language)) }
         if !prompt.isEmpty { fields.append(("prompt", prompt)) }
         try Self.writeMultipart(audio: file, destination: body, boundary: boundary, fields: fields)
-        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!)
+        var request = URLRequest(url: transcriptionEndpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")

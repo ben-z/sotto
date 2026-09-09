@@ -127,3 +127,47 @@ import Testing
     #expect(throws: (any Error).self) { try Configuration.loadOrCreate(from: url, recordingsDirectory: "/tmp/other") }
     #expect(try Data(contentsOf: url) == broken)
 }
+
+@Test(arguments: [0.0, 3601.0, Double.infinity, Double.nan])
+func rejectsInvalidRecordingLimits(_ limit: Double) {
+    var config = Configuration(recordingsDirectory: "/tmp/sotto")
+    config.maxRecordingSeconds = limit
+    #expect(throws: SottoError.self) { try config.validate() }
+}
+
+@Test(arguments: ["EN", "eng", "éé", "e1", ""])
+func rejectsInvalidLanguageCodes(_ language: String) {
+    var config = Configuration(recordingsDirectory: "/tmp/sotto")
+    config.language = language
+    #expect(throws: SottoError.self) { try config.validate() }
+}
+
+@Test func rejectsEmptyAudioBeforeAnyNetworkRequest() async throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data().write(to: file)
+    do {
+        _ = try await GroqClient().transcribe(file: file, key: "test-not-a-credential", model: "whisper-large-v3-turbo", language: "en", prompt: "")
+        Issue.record("Empty audio was accepted")
+    } catch {
+        #expect(error.localizedDescription.contains("Audio must be nonempty"))
+    }
+    #expect(FileManager.default.fileExists(atPath: file.path))
+}
+
+@Test func archiveRejectsFileAsDestination() throws {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: path) }
+    try Data("keep me".utf8).write(to: path)
+    #expect(throws: (any Error).self) { try Archive(directory: path) }
+    #expect(try String(contentsOf: path, encoding: .utf8) == "keep me")
+}
+
+@Test func oldContextOptionsAreIgnoredAndNotRewritten() throws {
+    var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Configuration(recordingsDirectory: "/tmp/sotto"))) as! [String: Any]
+    json["captureFocusedContext"] = true
+    json["contextHistoryCount"] = 10
+    let config = try JSONDecoder().decode(Configuration.self, from: JSONSerialization.data(withJSONObject: json))
+    let saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as! [String: Any]
+    #expect(saved["captureFocusedContext"] == nil && saved["contextHistoryCount"] == nil)
+}

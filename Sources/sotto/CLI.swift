@@ -103,6 +103,24 @@ struct CLI {
                 """)
             default: throw SottoError("Unknown command. Run `sotto help`.")
             }
-        } catch { fputs("Sotto: \(error.localizedDescription)\n", stderr); exit(1) }
+        } catch {
+            fputs("Sotto: \(error.localizedDescription)\n", stderr)
+            if CommandLine.arguments.count == 1 { showStartupError(error) }
+            exit(1)
+        }
     }
+    @MainActor static func showStartupError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Sotto could not start"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Show Configuration")
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        app.activate()
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([Paths.config])
+        }
+    }
+
 }

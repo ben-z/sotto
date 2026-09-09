@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import AVFoundation
 import OSLog
 import SottoCore
 
@@ -8,6 +9,10 @@ final class Agent: NSObject, NSApplicationDelegate {
     private(set) var session: Session
     private var settingsWindow: SettingsWindow?
     private var hotkey: Hotkey?
+    private let statusLine = NSMenuItem(title: "Ready", action: nil, keyEquivalent: "")
+    private var recordingAction: NSMenuItem?
+    private var cancelAction: NSMenuItem?
+    private var copyAction: NSMenuItem?
     private var artwork: SottoStatusArtwork?
     private var item: NSStatusItem?
     private let indicator = RecordingIndicator()
@@ -35,9 +40,16 @@ final class Agent: NSObject, NSApplicationDelegate {
             artwork = try SottoStatusArtwork(resourceDirectory: resources.appendingPathComponent("SottoStatus"))
             item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             let menu = NSMenu()
-            for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Open Recordings", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("Quit", #selector(quit))] {
+            menu.autoenablesItems = false
+            statusLine.isEnabled = false
+            menu.addItem(statusLine)
+            menu.addItem(.separator())
+            for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Copy Last Transcript", #selector(copyLastTranscript)), ("Open Recordings", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("About Sotto", #selector(about)), ("Quit", #selector(quit))] {
                 let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 entry.target = self; menu.addItem(entry)
+                if action == #selector(toggle) { recordingAction = entry }
+                if action == #selector(cancel) { cancelAction = entry }
+                if action == #selector(copyLastTranscript) { copyAction = entry }
             }
             item?.menu = menu
             connectSession()
@@ -46,13 +58,16 @@ final class Agent: NSObject, NSApplicationDelegate {
             installSignal(SIGTERM) { [weak self] in self?.quit() }
             installSignal(SIGINT) { [weak self] in self?.quit() }
             update()
-            // Recheck live prerequisites on launch; never persist a stale setup-complete flag.
-            editConfig()
-            settingsWindow?.present(showStatus: true)
+            // Healthy launches stay in the menu bar; no network request or saved readiness flag.
+            if GroqKeychain.storageStatus() != .stored || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized || (session.configuration.paste && !AXIsProcessTrusted()) {
+                editConfig()
+                settingsWindow?.present(showStatus: true)
+            }
         } catch {
             fputs("Sotto startup failed: \(error.localizedDescription)\n", stderr)
             logger.error("Startup failed: \(error.localizedDescription, privacy: .public)")
             try? JSONFile.write(["state": "startup_failed", "message": error.localizedDescription], to: Paths.status)
+            CLI.showStartupError(error)
             exit(1)
         }
     }
@@ -74,6 +89,23 @@ final class Agent: NSObject, NSApplicationDelegate {
             pasteTarget = NSWorkspace.shared.frontmostApplication
             Task { await session.begin() }
         } catch { session.fail(error) }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        editConfig()
+        return true
+    }
+
+    @objc private func about() {
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Sotto",
+            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
+            .credits: NSAttributedString(string: "Quiet dictation. Your Groq key. Your recordings.")])
+        NSApp.activate()
+    }
+
+    @objc private func copyLastTranscript() {
+        do { try copyToClipboard(session.lastTranscript) }
+        catch { session.fail(error) }
     }
 
     @objc func cancel() { Task { await session.cancel() } }
@@ -126,6 +158,19 @@ final class Agent: NSObject, NSApplicationDelegate {
             item.button?.imagePosition = .imageLeading
             item.button?.setAccessibilityValue(session.message)
         }
+        switch session.state {
+        case .idle: statusLine.title = "Ready · " + Hotkey.displayName(session.configuration)
+        case .preparing: statusLine.title = "Preparing microphone…"
+        case .recording: statusLine.title = "Recording…"
+        case .transcribing: statusLine.title = "Transcribing…"
+        case .error: statusLine.title = "Needs attention · open Settings"
+        }
+        statusLine.toolTip = session.message
+        let capturing = session.state == .recording || session.state == .preparing
+        recordingAction?.title = capturing ? "Stop Recording" : "Start Recording · " + Hotkey.displayName(session.configuration)
+        recordingAction?.isEnabled = session.state != .transcribing
+        cancelAction?.isEnabled = capturing || session.state == .transcribing
+        copyAction?.isEnabled = !session.lastTranscript.isEmpty
         item?.button?.toolTip = session.message
         item?.button?.title = session.state == .recording ? " REC" : ""
         indicator.update(session.state)
@@ -138,9 +183,14 @@ final class Agent: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func deliver(_ text: String) throws {
+    private func copyToClipboard(_ text: String) throws {
+        guard !text.isEmpty else { throw SottoError("There is no transcript to copy yet.") }
         NSPasteboard.general.clearContents()
         guard NSPasteboard.general.setString(text, forType: .string) else { throw SottoError("Cannot write transcript to clipboard.") }
+    }
+
+    private func deliver(_ text: String) throws {
+        try copyToClipboard(text)
         guard session.configuration.paste else { return }
         guard AXIsProcessTrusted() else { throw SottoError("Accessibility permission missing; transcript is on clipboard.") }
         guard let pasteTarget, NSWorkspace.shared.frontmostApplication?.processIdentifier == pasteTarget.processIdentifier else {

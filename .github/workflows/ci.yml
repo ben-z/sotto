@@ -1,0 +1,51 @@
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify pinned toolchain
+        run: test -d "$DEVELOPER_DIR" && xcodebuild -version
+      - name: Core tests
+        run: swift test
+      - name: Benchmark accounting and prerequisite tests
+        run: python3 scripts/test-benchmark.py
+      - name: Release preflight tests
+        run: python3 scripts/test-release.py
+      - name: Package and validate
+        env:
+          SOTTO_APP_PATH: ${{ github.workspace }}/.build/ci/Sotto.app
+        run: |
+          scripts/build.sh
+          python3 scripts/check-bundle.py "$SOTTO_APP_PATH"
+      - name: Measure deterministic resource usage
+        run: python3 scripts/benchmark-ci.py
+      - name: Upload resource report and samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-usage-${{ matrix.runner }}
+          path: |
+            work/ci-performance/report.md
+            work/ci-performance/report.json
+            work/ci-performance/samples.json
+          if-no-files-found: error
+      - name: Verify artwork
+        run: python3 design/icon/source/rebuild.py --check

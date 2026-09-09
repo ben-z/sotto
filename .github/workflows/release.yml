@@ -1,0 +1,63 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: test
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      SOTTO_SIGNING_IDENTITY: ${{ secrets.SOTTO_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      CERTIFICATE_P12_BASE64: ${{ secrets.CERTIFICATE_P12_BASE64 }}
+      CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate prerequisites and import signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in SOTTO_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD CERTIFICATE_P12_BASE64 CERTIFICATE_PASSWORD; do
+            test -n "${!name}" || { echo "Missing required secret: $name" >&2; exit 1; }
+          done
+          test "$RELEASE_TAG" = "v$(cat VERSION)" || { echo 'Tag must match VERSION' >&2; exit 1; }
+          keychain="$RUNNER_TEMP/sotto-signing.keychain-db"
+          password=$(openssl rand -hex 32)
+          echo "::add-mask::$password"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+      - name: Sign, notarize, staple, and verify
+        run: scripts/release.sh
+      - name: Publish verified files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" --verify-tag --title "Sotto $RELEASE_TAG" --notes-file RELEASE_NOTES.md \
+            ".build/distribution/Sotto-$(cat VERSION)-macOS-universal.zip" .build/distribution/SHA256SUMS
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/sotto-signing.keychain-db"; then
+            security delete-keychain "$RUNNER_TEMP/sotto-signing.keychain-db"
+          fi
+          rm -f "$RUNNER_TEMP/certificate.p12"

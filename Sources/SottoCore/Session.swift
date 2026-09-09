@@ -83,17 +83,22 @@ public final class Session: ObservableObject {
             try archive.complete(&record, with: result)
             lastTranscript = result.text
             // Files are safely persisted before clipboard/paste delivery.
-            do { try onTranscript?(result.text) }
+            let hasText = !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            do { if hasText { try onTranscript?(result.text) } }
             catch {
                 record.error = "Transcript saved; delivery failed: \(error.localizedDescription)"
                 try archive.save(record)
                 throw SottoError(record.error!)
             }
-            change(.idle, "Saved · \(record.id) · \(result.milliseconds) ms")
+            change(.idle, hasText ? "Saved · \(record.id) · \(result.milliseconds) ms" : "No speech recognized; audio retained · \(record.id)")
         } catch {
             if record.status != "complete" { record.status = upload?.isCancelled == true ? "cancelled" : "failed" }
             record.error = error.localizedDescription
-            do { try archive.save(record); fail(error) }
+            do {
+                try archive.save(record)
+                if record.status == "cancelled" { change(.idle, "Cancelled; audio retained · \(record.id)") }
+                else { fail(error) }
+            }
             catch { fail(SottoError("Could not save failure metadata: \(error.localizedDescription). Audio remains at \(archive.audioURL(record).path).")) }
         }
         upload = nil; self.record = nil

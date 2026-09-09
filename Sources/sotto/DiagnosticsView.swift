@@ -15,6 +15,7 @@ final class DiagnosticsView: NSView {
     private let microphone = NSTextField(wrappingLabelWithString: "")
     private let accessibility = NSTextField(wrappingLabelWithString: "")
     private let keyField = NSSecureTextField(string: "")
+    private let cancelReplacement = NSButton(title: "Cancel", target: nil, action: nil)
     private let saveKey = NSButton(title: "Save & Check", target: nil, action: nil)
     private let deleteKey = NSButton(title: "Delete Key…", target: nil, action: nil)
     private let check = NSButton(title: "Check Connection", target: nil, action: nil)
@@ -31,20 +32,24 @@ final class DiagnosticsView: NSView {
         keyField.setAccessibilityLabel("Groq API key")
         keyField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         saveKey.target = self; saveKey.action = #selector(setKey)
-        let keyEntry = row([keyField, saveKey])
+        keyField.target = self; keyField.action = #selector(setKey)
+        (keyField.cell as? NSTextFieldCell)?.sendsActionOnEndEditing = false
+        cancelReplacement.target = self; cancelReplacement.action = #selector(cancelReplacingKey)
+        let keyEntry = row([keyField, saveKey, cancelReplacement])
         keyEntry.distribution = .fill
         let getKey = NSButton(title: "Get a Groq API key ↗", target: self, action: #selector(openGroqKeys))
         deleteKey.target = self; deleteKey.action = #selector(confirmDeleteKey)
         let keyButtons = row([check, getKey, deleteKey])
         let axButton = NSButton(title: "Open Accessibility Settings…", target: self, action: #selector(openAccessibility))
+        axButton.toolTip = "If an enabled entry belongs to an older development build, remove it and add the current Sotto app again."
         let refreshButton = NSButton(title: "Refresh Status", target: self, action: #selector(refresh))
         let stack = NSStackView(views: [
-            readiness, separator(), heading("1. Groq API key"), keyStatus,
+            readiness, separator(), heading("Groq connection"), keyStatus,
             note("Your key stays in this device’s Keychain, never in your config file."),
             keyEntry, connection, keyButtons,
-            note("Your recordings go directly to Groq using your account and its usage limits. Keychain: Sotto.Groq / api-key."),
+            note("Audio goes directly to Groq using your account. All recordings stay in your chosen folder."),
             note("Connection check verifies authentication and the selected model listing. It does not record audio or test transcription/quota."),
-            separator(), heading("2. Permissions"), microphone, micAction, accessibility, axButton,
+            separator(), heading("Permissions"), microphone, micAction, accessibility, axButton,
             separator(), refreshButton
         ])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
@@ -60,6 +65,7 @@ final class DiagnosticsView: NSView {
         for view in stack.arrangedSubviews where view is NSTextField || view is NSBox {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+        keyStatus.toolTip = "macOS Keychain · service Sotto.Groq · account api-key"
         readiness.font = .systemFont(ofSize: 13, weight: .semibold)
         refresh()
     }
@@ -77,13 +83,19 @@ final class DiagnosticsView: NSView {
     @objc func refresh() {
         let storage = GroqKeychain.storageStatus()
         let keyStored = storage == .stored
-        if !keyStored { connectionVerified = false }
+        if !keyStored {
+            connectionVerified = false
+            checkedModel = nil
+        }
         let showSavedKey = keyStored && !replacingKey
         keyField.placeholderString = showSavedKey ? "•••••••• · Saved in Keychain" : "Paste your Groq API key"
         keyField.setAccessibilityLabel(showSavedKey ? "API key saved in Keychain" : "Groq API key")
         keyField.isEnabled = !showSavedKey && checkTask == nil
         saveKey.title = showSavedKey ? "Replace Key…" : "Save & Check"
         saveKey.isEnabled = checkTask == nil
+        cancelReplacement.isHidden = !replacingKey
+        cancelReplacement.isEnabled = checkTask == nil
+        check.isEnabled = checkTask == nil && storage != .missing
         deleteKey.isHidden = storage == .missing
         deleteKey.isEnabled = checkTask == nil
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -93,25 +105,34 @@ final class DiagnosticsView: NSView {
         let axAllowed = !accessibilityRequired || accessibilityGranted
         let verified = connectionVerified && checkedModel == selectedModel()
         var pending: [String] = []
-        if !verified { pending.append("check the Groq connection") }
+        if storage == .missing { pending.append("add a Groq key") }
+        else if !keyStored { pending.append("check Keychain access") }
         if !micAllowed { pending.append("allow microphone access") }
         if !axAllowed { pending.append("allow Accessibility or disable auto-paste") }
-        readiness.stringValue = pending.isEmpty
-            ? "Setup checks passed. Save any changed options, then use your shortcut to record."
-            : "Setup needs attention: " + pending.joined(separator: "; ") + "."
-        readiness.textColor = pending.isEmpty ? .systemGreen : .systemOrange
+        if !pending.isEmpty {
+            readiness.stringValue = "To get started: " + pending.joined(separator: "; ") + "."
+            readiness.textColor = .systemOrange
+        } else if verified {
+            readiness.stringValue = "Ready to record. Groq connection verified."
+            readiness.textColor = .systemGreen
+        } else {
+            readiness.stringValue = "Key and permissions are in place. Check Connection to verify Groq."
+            readiness.textColor = .labelColor
+        }
         switch storage {
-        case .stored: keyStatus.stringValue = "Saved in Keychain · access is verified when used"; keyStatus.textColor = .labelColor
+        case .stored: keyStatus.stringValue = "Key saved in Keychain"; keyStatus.textColor = .labelColor
         case .missing: keyStatus.stringValue = "Add your key to connect Sotto to Groq"; keyStatus.textColor = .systemRed
         case .authorizationRequired: keyStatus.stringValue = "Keychain authorization needed · use Check Connection"; keyStatus.textColor = .systemOrange
         case .failure(let status): keyStatus.stringValue = "Keychain check failed (OSStatus \(status))"; keyStatus.textColor = .systemRed
         }
         if let checkedModel, checkedModel != selectedModel(), checkTask == nil {
+            connectionVerified = false
+            self.checkedModel = nil
             connection.stringValue = "Model changed. Check Connection again."; connection.textColor = .secondaryLabelColor
         }
         switch microphoneStatus {
         case .authorized: microphone.stringValue = "Microphone: Allowed · required for recording"; microphone.textColor = .systemGreen
-        case .notDetermined: microphone.stringValue = "Microphone: Not requested · required for recording"; microphone.textColor = .systemOrange
+        case .notDetermined: microphone.stringValue = "Microphone: Allow access to record your voice"; microphone.textColor = .systemOrange
         case .denied: microphone.stringValue = "Microphone: Denied · enable Sotto in System Settings"; microphone.textColor = .systemRed
         case .restricted: microphone.stringValue = "Microphone: Restricted by macOS policy"; microphone.textColor = .systemRed
         @unknown default: microphone.stringValue = "Microphone: Unknown authorization state"; microphone.textColor = .systemRed
@@ -123,10 +144,10 @@ final class DiagnosticsView: NSView {
                 : "Accessibility: Allowed · not required while auto-paste is off"
             accessibility.textColor = .systemGreen
         } else if accessibilityRequired {
-            accessibility.stringValue = "Accessibility: Not authorized · required for auto-paste. If Sotto is already enabled in System Settings, turn it off and on again."
+            accessibility.stringValue = "Accessibility: Allow access for auto-paste, or turn auto-paste off in Settings."
             accessibility.textColor = .systemRed
         } else {
-            accessibility.stringValue = "Accessibility: Not granted · not required while auto-paste is off"
+            accessibility.stringValue = "Accessibility: Not needed · auto-paste is off"
             accessibility.textColor = .secondaryLabelColor
         }
     }
@@ -141,6 +162,7 @@ final class DiagnosticsView: NSView {
         deleteKey.isEnabled = false
         saveKey.isEnabled = false
         keyField.isEnabled = false
+        cancelReplacement.isEnabled = false
         checkTask = Task { [weak self] in
             do {
                 let key = try GroqKeychain.read()
@@ -179,6 +201,16 @@ final class DiagnosticsView: NSView {
             connection.textColor = .systemRed
             refresh()
         }
+    }
+
+    @objc private func cancelReplacingKey() {
+        replacingKey = false
+        keyField.stringValue = ""
+        connectionVerified = false
+        checkedModel = nil
+        connection.stringValue = "Saved key unchanged. Click Check Connection to verify with Groq."
+        connection.textColor = .secondaryLabelColor
+        refresh()
     }
 
     @objc private func confirmDeleteKey() {

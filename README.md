@@ -33,9 +33,17 @@ Your key stays in this device’s Keychain. Recordings go directly to Groq using
 
 The default shortcut is **Control+Option+Space** to start or stop. Choose **hold to record** or toggle mode in Settings. The small display-edge light is coral while recording and blue while transcribing; the menu bar also shows **REC**.
 
-Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. Advanced shortcut settings are available through **Copy Config Path**.
+Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. The menu shows the current recording state and lets you copy the last transcript again. Once permissions and a saved key are in place, launches stay quietly in the menu bar. Advanced shortcut settings are available through **Copy Config Path**.
 
 Audio is transcribed after recording stops. There is no always-on microphone, local model, or background screen capture.
+
+## Efficiency
+
+Native Swift with no third-party runtime dependencies or local model downloads. The current arm64 development app occupies **748 KiB on disk**, excluding retained recordings.
+
+[CI resource reports](https://github.com/ben-z/sotto/actions/workflows/ci.yml) are the regression source of truth: every push and pull request measures the optimized production core on Apple Silicon and Intel with fixed audio fixtures and a local HTTP server. Memory growth, peak footprint, and packaged app size have enforced limits; CPU and raw samples are reported too. This controlled test requires no credentials or microphone and does not measure the menu-bar UI or Groq inference.
+
+A separate [live app measurement](docs/performance-results.md) on an Apple M4 measured **44.5 MiB idle median** and **45.8 MiB peak during transcription**, across three 15-second microphone recordings. See the [methodology and reproduction commands](docs/performance.md) for scope and limitations. CI and live-app figures describe different workloads and should not be compared directly.
 
 ## Your recordings
 
@@ -70,3 +78,7 @@ Development builds are ad-hoc signed, so rebuilding can require permission reapp
 An experimental iPhone/iPad app shares the core. Open `iOS/Sotto.xcodeproj` in Xcode; it requires iOS 17+ and still needs device testing.
 
 See [validation notes](VALIDATION.md) for measured results and limitations, and [icon sources](design/icon/README.md) for artwork.
+
+## Releases
+
+Current version: **v0.1.0**. CI tests Apple Silicon and Intel builds. Version tags trigger a signed, notarized universal macOS ZIP release after verification. See [RELEASING.md](RELEASING.md) for the required Apple credentials, local checks, and publishing steps. Publishing is blocked until signing/notarization secrets are configured; development builds remain ad-hoc signed.

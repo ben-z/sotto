@@ -4,3 +4,4 @@
 /iOS/build/
 **/xcuserdata/
 **/.DS_Store
+**/__pycache__/

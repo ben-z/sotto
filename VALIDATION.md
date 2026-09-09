@@ -48,3 +48,31 @@ The running app bundle was not replaced during this review, to avoid another dev
 - Removed focused-text extraction and context history, along with their obsolete tests. Existing archive fields/files remain intact; new recordings have empty prompts/context terms. Accessibility is required only for auto-paste.
 - Ten remaining core tests pass; release compilation and bundle signature verification pass. The rebuilt app launched and reported idle. This does not certify macOS permission grants after ad-hoc signing.
 - The classic app icon and centered 18-point template bird are bundled. Only two glyph PNGs ship; obsolete state PNGs are removed from the generated bundle. REC text and the recording edge light remain. Bundle allocation: 716 KiB.
+
+## v0.1.0 release automation — September 8, 2026
+
+- Fifteen core tests passed, including parameterized invalid language/recording limits, empty audio rejection, legacy config compatibility, and invalid archive destinations.
+- Four release preflight tests passed: missing identity, missing notarization account, ad-hoc identity rejection, and tag/version mismatch all stop before building or contacting Apple.
+- A separate ad-hoc universal bundle compiled for arm64 and x86_64; bundle checks passed for VERSION, required resources, signature, both binary slices, and CLI startup. The running app was not replaced.
+- Workflow YAML parsed and shell syntax checks passed. GitHub-hosted jobs have not been run in this session.
+- Production signing/notarization/publication remain BLOCKED: no local valid signing identities and no repository Actions secrets were listed. No tag was pushed or release published. Signing, notarization, stapling, and Gatekeeper release checks are implemented but not claimed verified without credentials.
+
+
+## Daily-use polish — September 8, 2026
+
+- Kept the same dependency-free executable and shared core. Added explicit menu state, action availability, Copy Last Transcript, versioned About, quiet launch after local setup, and a visible startup-error alert. Empty transcription results retain files without clearing the clipboard; upload cancellation returns to idle after saving cancellation metadata.
+- Settings now displays the configured shortcut, uses a compact height per tab, and enables Save Changes only for actual edits. Return on Status submits the key field. Key replacement can be cancelled without changing the credential; cancellation clears entry errors. Permission and connection statuses distinguish local readiness from a successful Groq check.
+- Computer-use checks on the running release app verified both tab layouts, masked saved-key display, empty-key Return validation without closing Settings, replacement cancellation, delete-confirmation cancellation, and Save becoming enabled on a checkbox change and disabled when reverted. The empty-key regression was repeated on the final build. No actual saved key was replaced or deleted.
+- Fifteen core tests, four release preflight tests, release compilation, packaged resource/version/signature checks, and git whitespace checks passed. Native bundle allocation is 744 KiB.
+- Live connection/recording validation is pending macOS Keychain authorization and fresh microphone/Accessibility grants for the rebuilt ad-hoc signature. Computer use cannot operate the protected SecurityAgent prompt. These flows are not claimed verified for this build yet.
+
+
+## Automated memory benchmark — September 8, 2026
+
+- Added an external, standard-library Python benchmark of the running macOS app: physical footprint/RSS via native proc_pid_rusage, CPU deltas, idle-before, repeated microphone/Groq cycles, and idle-after. No app runtime code changed for instrumentation. Reports omit transcript text, keys, recording paths, and recording IDs. Configurable footprint and retained-growth limits fail nonzero.
+- Eight offline tests passed, including native process sampling, incorrect/reused PID rejection, phase accounting without inter-cycle CPU contamination, missing phases, and independent memory limits. Added the tests to both macOS CI architectures; hosted CI has not been run here.
+- Computer use verified Groq accepted the saved key and microphone permission was allowed, then changed auto-paste to clipboard-only for measurement. The initial live run failed explicitly when another recording interrupted the idle window; its samples/failure were retained and were not published as a successful result.
+
+- Completed the live benchmark after authorization. The first successful measurement exposed a CPU tick conversion error, caught by an independent busy-process comparison. Added a kernel wait-accounting regression test and reran: 44.5 MiB idle median before, 45.8 MiB transcription sampled peak, 45.1 MiB idle median after; nine accounting tests pass. Full dated report is in docs/performance-results.md. vmmap independently reported approximately 45 MiB physical footprint.
+- Restored the original auto-paste preference after benchmarking. Computer use verified microphone is allowed and Status explicitly identifies the remaining development Accessibility grant as missing. No saved credential was changed.
+- Added a deterministic CI benchmark, built with optimization from the actual core sources against a loopback HTTP fixture. It reports warm-up separately and exercises 60/600-second WAV uploads and archive completion; the local controlled run passed. CPU, peak footprint, retained growth, bundle bytes, fixture hashes, compiler/image, and raw samples are reported. No measurement code is packaged. Repository history credential-pattern scan found no matches and no tracked audio; repository made public with user authorization.

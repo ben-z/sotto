@@ -3,13 +3,14 @@ import SottoCore
 
 /// Built on demand and released on close; the configuration file stays canonical.
 @MainActor
-final class SettingsWindow: NSWindowController, NSWindowDelegate {
+final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDelegate {
     private let original: Configuration
     private let saveConfiguration: (Configuration) throws -> Void
     private let didClose: () -> Void
     private let configurationURL: URL
     private var diagnostics: DiagnosticsView!
     private let tabs = NSTabView()
+    private let saveButton = NSButton(title: "Save Changes", target: nil, action: nil)
     private let language = NSPopUpButton()
     private let model = NSPopUpButton()
     private let mode = NSPopUpButton()
@@ -47,7 +48,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         paste.state = configuration.paste ? .on : .off
         trim.state = configuration.trimWhitespace ? .on : .off
         paste.target = self; paste.action = #selector(optionsChanged)
-        model.target = self; model.action = #selector(optionsChanged)
+        for control in [language, model, mode] { control.target = self; control.action = #selector(optionsChanged) }
+        trim.target = self; trim.action = #selector(optionsChanged)
         folder.stringValue = configuration.recordingsDirectory
         folder.lineBreakMode = .byTruncatingMiddle
         folder.toolTip = configuration.recordingsDirectory
@@ -59,7 +61,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         choose.setContentHuggingPriority(.required, for: .horizontal)
         let grid = NSGridView(views: [
             [label("Language"), language], [label("Model"), model],
-            [label("Shortcut mode"), mode], [label("Recordings"), folderRow],
+            [label("Shortcut"), label(Hotkey.displayName(configuration))],
+            [label("Recording mode"), mode], [label("Recordings"), folderRow],
             [label("Output"), paste],
             [label("Text"), trim],
         ])
@@ -75,12 +78,12 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         errorLabel.maximumNumberOfLines = 0
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
         cancel.keyEquivalent = "\u{1b}"
-        let save = NSButton(title: "Save", target: self, action: #selector(save))
-        save.keyEquivalent = "\r"
+        saveButton.target = self; saveButton.action = #selector(save)
+        saveButton.keyEquivalent = "\r"
         let copyPath = NSButton(title: "Copy Config Path", target: self, action: #selector(copyConfigPath(_:)))
         copyPath.toolTip = configurationURL.path
         let reveal = NSButton(title: "Show in Finder", target: self, action: #selector(revealConfig))
-        let buttons = NSStackView(views: [copyPath, reveal, NSView(), cancel, save])
+        let buttons = NSStackView(views: [copyPath, reveal, NSView(), cancel, saveButton])
         buttons.orientation = .horizontal; buttons.spacing = 8
 
         let stack = NSStackView(views: [description, grid])
@@ -95,6 +98,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         let settingsTab = NSTabViewItem(identifier: "settings"); settingsTab.label = "Settings"; settingsTab.view = general
         let statusTab = NSTabViewItem(identifier: "status"); statusTab.label = "Status"; statusTab.view = diagnostics
         tabs.addTabViewItem(settingsTab); tabs.addTabViewItem(statusTab)
+        tabs.delegate = self
         for view in [tabs, errorLabel, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(view)
         }
@@ -116,6 +120,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
             buttons.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16)
         ])
+        updateButtons()
         window.center()
     }
 
@@ -134,6 +139,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         errorLabel.stringValue = error.map { "Last attempt: " + $0 } ?? ""
         diagnostics.refresh()
         if showStatus { tabs.selectTabViewItem(at: 1) }
+        tabView(tabs, didSelect: tabs.selectedTabViewItem)
         NSApp.setActivationPolicy(.regular)
         showWindow(nil)
         NSApp.activate()
@@ -150,10 +156,11 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         picker.beginSheetModal(for: window) { [weak self] result in
             guard result == .OK, let url = picker.url else { return }
             self?.folder.stringValue = url.path; self?.folder.toolTip = url.path
+            self?.updateButtons()
         }
     }
 
-    @objc private func optionsChanged() { diagnostics.refresh() }
+    @objc private func optionsChanged() { diagnostics.refresh(); updateButtons() }
     @objc private func copyConfigPath(_ sender: NSButton) {
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(configurationURL.path, forType: .string) { sender.title = "Path Copied" }
@@ -161,15 +168,36 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
     }
     @objc private func revealConfig() { NSWorkspace.shared.activateFileViewerSelecting([configurationURL]) }
     @objc private func cancel() { close() }
-    @objc private func save() {
+    private var editedConfiguration: Configuration {
         var config = original
         config.language = value(language).isEmpty ? nil : value(language)
         config.model = value(model); config.hotkeyMode = value(mode)
         config.recordingsDirectory = folder.stringValue
         config.trimWhitespace = trim.state == .on
         config.paste = paste.state == .on
+        return config
+    }
+
+    @objc private func save() {
+        let config = editedConfiguration
         do { try saveConfiguration(config); close() }
         catch { errorLabel.stringValue = error.localizedDescription }
+    }
+
+    private func updateButtons() {
+        saveButton.isEnabled = editedConfiguration != original
+        saveButton.keyEquivalent = tabs.selectedTabViewItem?.identifier as? String == "settings" ? "\r" : ""
+    }
+
+    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        updateButtons()
+        guard let window else { return }
+        let height: CGFloat = tabViewItem?.identifier as? String == "settings" ? 410 : 650
+        var frame = window.frame
+        let contentHeight = window.contentRect(forFrameRect: frame).height
+        frame.origin.y += contentHeight - height
+        frame.size.height += height - contentHeight
+        window.setFrame(frame, display: true)
     }
 
     func windowDidBecomeKey(_ notification: Notification) { diagnostics.refresh() }
