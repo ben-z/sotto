@@ -11,7 +11,7 @@ final class NotesUITests: XCTestCase {
         app.buttons["note-ios-delete-fixture-b"].tap()
         XCTAssertTrue(app.staticTexts["2 selected"].exists)
         app.buttons["Transcribe…"].tap()
-        XCTAssertTrue(app.staticTexts["Transcribe 2 recording(s)"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Transcribe 2 recordings"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Transcribe"].isEnabled)
         app.buttons["Cancel"].tap()
         app.buttons["Delete"].tap()

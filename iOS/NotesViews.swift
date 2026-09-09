@@ -20,6 +20,11 @@ private func status(_ note: RecordingRecord, keyStored: Bool) -> String {
     }
 }
 
+private struct TranscriptionSelection: Identifiable {
+    let ids: Set<String>
+    var id: String { ids.sorted().joined(separator: ",") }
+}
+
 struct NotesView: View {
     @ObservedObject var store: NotesStore
     @ObservedObject var library: NoteLibrary
@@ -28,8 +33,7 @@ struct NotesView: View {
     @State private var selection = Set<String>()
     @State private var deleting = Set<String>()
     @State private var confirmDelete = false
-    @State private var transcribing = false
-    @State private var transcriptionIDs = Set<String>()
+    @State private var transcription: TranscriptionSelection?
     @State private var renaming: RecordingRecord?
     @State private var renameShown = false
     @State private var draftTitle = ""
@@ -61,7 +65,7 @@ struct NotesView: View {
                             renaming = note; draftTitle = note.title ?? note.generatedTitle ?? ""; renameShown = true
                         }
                         Button("Transcribe…", systemImage: "waveform") {
-                            transcriptionIDs = [note.id]; transcribing = true
+                            transcription = TranscriptionSelection(ids: [note.id])
                         }.disabled(["recording", "transcribing"].contains(note.status))
                         Button("Delete", systemImage: "trash", role: .destructive) { requestDelete([note.id]) }
                             .disabled(["recording", "transcribing"].contains(note.status))
@@ -90,7 +94,7 @@ struct NotesView: View {
                     if editMode.isEditing {
                         Text("\(selection.count) selected").font(.caption).foregroundStyle(.secondary)
                         HStack {
-                            Button("Transcribe…", systemImage: "waveform") { transcriptionIDs = selection; transcribing = true }
+                            Button("Transcribe…", systemImage: "waveform") { transcription = TranscriptionSelection(ids: selection) }
                             Spacer()
                             Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(selection) }
                         }.disabled(selection.isEmpty || selectionBusy)
@@ -113,7 +117,7 @@ struct NotesView: View {
                 if id != nil { editMode = .inactive; selection.removeAll() }
             }
             .sheet(isPresented: $settings) { SettingsView(store: store) }
-            .sheet(isPresented: $transcribing) { TranscribeSheet(store: store, ids: transcriptionIDs) }
+            .sheet(item: $transcription) { TranscribeSheet(store: store, ids: $0.ids) }
             .alert("Rename note", isPresented: $renameShown) {
                 TextField("Title", text: $draftTitle)
                 Button("Cancel", role: .cancel) { }
@@ -123,7 +127,7 @@ struct NotesView: View {
                     }
                 }
             }
-            .confirmationDialog("Delete \(deleting.count) note(s)?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            .confirmationDialog(deleting.count == 1 ? "Delete this note?" : "Delete \(deleting.count) notes?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete permanently", role: .destructive) {
                     do { try store.delete(deleting); selection.subtract(deleting) }
                     catch { store.error = error.localizedDescription }
@@ -246,7 +250,7 @@ struct TranscribeSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Text("Transcribe \(ids.count) recording(s)")
+                Text(ids.count == 1 ? "Transcribe recording" : "Transcribe \(ids.count) recordings")
                 Picker("Model", selection: $model) {
                     Text("whisper-large-v3-turbo").tag("whisper-large-v3-turbo")
                     Text("whisper-large-v3").tag("whisper-large-v3")
