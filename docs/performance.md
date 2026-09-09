@@ -4,7 +4,7 @@ Sotto has no third-party runtime dependencies, local inference model, or backgro
 
 ## Measured results
 
-[GitHub CI reports](https://github.com/ben-z/sotto/actions/workflows/ci.yml) are the source of truth for controlled regressions. Open a run's job summary for the table, or download its `resource-usage-macos-15` / `resource-usage-macos-15-intel` artifact for Markdown, JSON, and raw samples. The workflow runs on every main push and pull request, and can be started manually.
+[GitHub CI reports](https://github.com/ben-z/sotto/actions/workflows/ci.yml) are the source of truth for controlled regressions. Open a run's job summary for the table, or download its `resource-usage-macos-15` / `resource-usage-macos-15-intel` artifact for Markdown, JSON, and raw samples. The workflow runs on every main push and pull request, and can be started manually. The [first verified baseline](ci-performance-baseline.md) is also committed for readers without a GitHub login and survives artifact expiration.
 
 The [September 8 live app report](performance-results.md) is a separate real-microphone/Groq spot check: Apple M4, macOS 26.1, three 15-second recordings, 44.5 MiB pre-cycle idle median, 45.8 MiB sampled transcription peak, and 45.1 MiB post-cycle idle median. The arm64 app occupied 744 KiB allocated disk space (`du -sk`), excluding retained recordings. This is not a universal download-size claim. macOS `vmmap` independently reported approximately 45 MiB physical footprint after the run.
 

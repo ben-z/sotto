@@ -1,0 +1,72 @@
+{
+  "workload": "optimized production core with deterministic loopback HTTP fixture; not the menu-bar app",
+  "commit": "79290c55180c1d71906a6c005d5d870e9668c593",
+  "runner": "GitHub Actions 1000004412",
+  "architecture": "arm64",
+  "macos": "15.7.9",
+  "image": "20260829.0321.1",
+  "swift": "swift-driver version: 1.120.5 Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)\nTarget: arm64-apple-macosx15.0",
+  "fixtures": {
+    "short": {
+      "seconds": 60,
+      "bytes": 1920044,
+      "sha256": "4c59ed976769ba50aba4a23ef2823cf795f0b555d48f4c80d41576ce9f3378b7"
+    },
+    "long": {
+      "seconds": 600,
+      "bytes": 19200044,
+      "sha256": "e14ff9e3be3d5257e57c029ea807754eaf22d1104999d69db4ec9e50e7c674d4"
+    }
+  },
+  "summary": {
+    "warmup": {
+      "samples": 281,
+      "sampled_seconds": 6.964168167000025,
+      "footprint_median_mib": 7.454345703125,
+      "footprint_peak_mib": 16.813720703125,
+      "rss_peak_mib": 29.453125,
+      "cpu_percent": 1.0397658403740038
+    },
+    "idle_before": {
+      "samples": 214,
+      "sampled_seconds": 5.311362083000063,
+      "footprint_median_mib": 7.048095703125,
+      "footprint_peak_mib": 7.048095703125,
+      "rss_peak_mib": 29.453125,
+      "cpu_percent": 0.01995721593511238
+    },
+    "short_upload": {
+      "samples": 105,
+      "sampled_seconds": 2.5298426249997874,
+      "footprint_median_mib": 5.157470703125,
+      "footprint_peak_mib": 7.048095703125,
+      "rss_peak_mib": 42.515625,
+      "cpu_percent": 0.9995038723012326
+    },
+    "long_upload": {
+      "samples": 688,
+      "sampled_seconds": 16.95362516700004,
+      "footprint_median_mib": 4.938720703125,
+      "footprint_peak_mib": 12.548095703125,
+      "rss_peak_mib": 46.796875,
+      "cpu_percent": 0.880679393714314
+    },
+    "idle_after": {
+      "samples": 195,
+      "sampled_seconds": 5.010499291999963,
+      "footprint_median_mib": 4.938720703125,
+      "footprint_peak_mib": 4.938720703125,
+      "rss_peak_mib": 46.828125,
+      "cpu_percent": 0.03469464615583518
+    }
+  },
+  "limits": {
+    "idle_peak_mib": 96,
+    "active_peak_mib": 128,
+    "idle_growth_mib": 24,
+    "bundle_mib": 2
+  },
+  "failures": [],
+  "bundle_bytes": 749009,
+  "run_url": "https://github.com/ben-z/sotto/actions/runs/34305225130"
+}
