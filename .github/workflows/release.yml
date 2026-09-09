@@ -18,8 +18,12 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: refs/tags/${{ inputs.tag || github.event.release.tag_name }}
+  ios:
+    uses: ./.github/workflows/ios.yml
+    with:
+      ref: refs/tags/${{ inputs.tag || github.event.release.tag_name }}
   publish:
-    needs: test
+    needs: [test, ios]
     runs-on: macos-15
     timeout-minutes: 20
     permissions:
@@ -71,12 +75,23 @@ jobs:
       - name: Sign, notarize, staple, and verify
         if: env.NOTARIZE == 'true'
         run: scripts/release.sh --notarized
+      - name: Download verified iOS package
+        uses: actions/download-artifact@v8
+        with:
+          name: Sotto-unsigned-ipa
+          path: work/ipa
+      - name: Verify iOS package checksum
+        run: |
+          set -euo pipefail
+          cd work/ipa
+          shasum -a 256 -c Sotto-unsigned.ipa.sha256
       - name: Attach verified files to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "$RELEASE_TAG" \
-            ".build/distribution/Sotto-$(cat VERSION)-macOS-universal.zip" .build/distribution/SHA256SUMS
+            ".build/distribution/Sotto-$(cat VERSION)-macOS-universal.zip" .build/distribution/SHA256SUMS \
+            work/ipa/Sotto-unsigned.ipa work/ipa/Sotto-unsigned.ipa.sha256
       - name: Remove signing material
         if: always()
         shell: bash
