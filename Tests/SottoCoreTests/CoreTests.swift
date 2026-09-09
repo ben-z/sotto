@@ -197,7 +197,7 @@ func rejectsInvalidLanguageCodes(_ language: String) {
     #expect(try release("v0.1.2").updateURL(currentVersion: "0.2.0") == nil)
     #expect(try release("v1.0.0", draft: true).updateURL(currentVersion: "0.1.2") == nil)
     #expect(try release("v1.0.0-beta", prerelease: true).updateURL(currentVersion: "0.1.2") == nil)
-    #expect(throws: SottoError.self) { try release("v1.0.0", ready: false).updateURL(currentVersion: "0.1.2") }
+    #expect(throws: AppRelease.DownloadPending.self) { try release("v1.0.0", ready: false).updateURL(currentVersion: "0.1.2") }
     #expect(throws: SottoError.self) { try release("vgarbage").updateURL(currentVersion: "0.1.2") }
     #expect(throws: SottoError.self) { try release("v1.0.0").updateURL(currentVersion: "Development") }
 }

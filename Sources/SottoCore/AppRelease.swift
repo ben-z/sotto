@@ -12,6 +12,11 @@ public struct AppRelease: Decodable, Sendable {
         public let size: Int
     }
 
+    public struct DownloadPending: LocalizedError, Sendable {
+        public let version: String
+        public var errorDescription: String? { "Sotto \(version) download is being prepared." }
+    }
+
     public func updateURL(currentVersion: String) throws -> URL? {
         func components(_ value: String) throws -> [Int] {
             let parts = value.split(separator: ".", omittingEmptySubsequences: false)
@@ -25,7 +30,7 @@ public struct AppRelease: Decodable, Sendable {
         let newer = try components(currentVersion).lexicographicallyPrecedes(components(version))
         guard newer else { return nil }
         guard assets.contains(where: { $0.name == "Sotto-\(version)-macOS-universal.zip" && $0.state == "uploaded" && $0.size > 0 }) else {
-            throw SottoError("Sotto \(version) is published, but its app download is not ready. Check again later.")
+            throw DownloadPending(version: version)
         }
         return URL(string: "https://github.com/ben-z/sotto/releases/tag/\(tag_name)")!
     }

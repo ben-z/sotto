@@ -7,6 +7,7 @@ final class UpdateChecker: NSObject {
     let checkItem = NSMenuItem(title: "Check for Updates", action: nil, keyEquivalent: "")
     let statusItem = NSMenuItem(title: "Updates not checked", action: nil, keyEquivalent: "")
     let downloadItem = NSMenuItem(title: "Download Update…", action: nil, keyEquivalent: "")
+    var onChange: (() -> Void)?
     private var releaseURL: URL?
     private var request: Task<Void, Never>?
     private var schedule: Task<Void, Never>?
@@ -40,6 +41,7 @@ final class UpdateChecker: NSObject {
             request?.cancel(); request = nil
             checkItem.isEnabled = true
             statusItem.title = "Automatic update checks off"
+            onChange?()
         }
     }
 
@@ -52,7 +54,7 @@ final class UpdateChecker: NSObject {
             guard let self else { return }
             defer {
                 // A cancelled request must not clear a newer request after re-enabling.
-                if !Task.isCancelled { request = nil; checkItem.isEnabled = true }
+                if !Task.isCancelled { request = nil; checkItem.isEnabled = true; onChange?() }
             }
             do {
                 try Task.checkCancellation()
@@ -66,6 +68,10 @@ final class UpdateChecker: NSObject {
                 downloadItem.title = "Download Sotto \(release.tag_name)…"
                 statusItem.title = releaseURL == nil ? "Sotto is up to date · checked \(Date().formatted(date: .omitted, time: .shortened))" : "Sotto \(release.tag_name) is available"
                 AppLog.shared.record("Updates: \(statusItem.title)")
+            } catch let pending as AppRelease.DownloadPending {
+                releaseURL = nil; downloadItem.isHidden = true
+                statusItem.title = pending.localizedDescription
+                AppLog.shared.record("Updates: \(statusItem.title)")
             } catch {
                 guard !Task.isCancelled else { return }
                 statusItem.title = "Couldn’t check for updates · try again"
@@ -73,6 +79,7 @@ final class UpdateChecker: NSObject {
                 AppLog.shared.record("Update check: \(error.localizedDescription)", error: true)
             }
         }
+        onChange?()
     }
 
     nonisolated static func fetchLatest(version: String) async throws -> AppRelease {
@@ -92,10 +99,11 @@ final class UpdateChecker: NSObject {
         return try JSONDecoder().decode(AppRelease.self, from: data)
     }
 
-    @objc private func download() {
+    @objc func download() {
         guard let releaseURL else { return }
         if !NSWorkspace.shared.open(releaseURL) {
             statusItem.title = "Couldn’t open the release page"
+            onChange?()
             AppLog.shared.record("Could not open \(releaseURL.absoluteString)", error: true)
         }
     }

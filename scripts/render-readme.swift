@@ -37,7 +37,7 @@ import SottoCore
         try save(guide, "indicator-guide.png")
 
         let config = Configuration(recordingsDirectory: "~/Documents/Sotto")
-        let settings = SettingsWindow(configuration: config, configurationURL: URL(fileURLWithPath: "/Users/you/Library/Application Support/Sotto/config.json"), onSave: { _ in throw SottoError("Documentation preview cannot save settings") }, onClose: {})
+        let settings = SettingsWindow(configuration: config, configurationURL: URL(fileURLWithPath: "/Users/you/Library/Application Support/Sotto/config.json"), updates: UpdateChecker(), onSave: { _ in throw SottoError("Documentation preview cannot save settings") }, onClose: {})
         settings.present(showStatus: false)
         settings.window?.makeFirstResponder(nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {

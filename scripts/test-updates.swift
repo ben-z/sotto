@@ -65,6 +65,15 @@ actor Requests {
         try await finish(race)
         try expect(!race.downloadItem.isHidden, "Re-enabling during cancellation lost its request")
         race.configure(automatic: false)
+        let pendingRelease = try JSONDecoder().decode(AppRelease.self, from: Data("""
+        {"tag_name":"v0.1.3","draft":false,"prerelease":false,"assets":[]}
+        """.utf8))
+        let pending = UpdateChecker(version: "0.1.1") { _ in pendingRelease }
+        var notifications = 0
+        pending.onChange = { notifications += 1 }
+        pending.check(); try await finish(pending)
+        try expect(pending.statusItem.title.contains("being prepared") && pending.downloadItem.isHidden, "Pending download must have a specific status")
+        try expect(notifications >= 2, "Settings must receive progress and completion")
         let missing = UpdateChecker(version: nil) { _ in latest }
         missing.check(); try await finish(missing)
         try expect(missing.statusItem.title.contains("Couldn’t check"), "Missing version must fail")

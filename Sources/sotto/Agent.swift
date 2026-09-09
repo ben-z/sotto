@@ -144,7 +144,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     @objc func openRecordings() { NSWorkspace.shared.open(session.archive.directory) }
     @objc func editConfig() {
         if settingsWindow == nil {
-            settingsWindow = SettingsWindow(configuration: session.configuration, configurationURL: Paths.config, onSave: { [weak self] config in
+            settingsWindow = SettingsWindow(configuration: session.configuration, configurationURL: Paths.config, updates: updates, onSave: { [weak self] config in
                 guard let self else { throw SottoError("Sotto is shutting down.") }
                 try self.applyConfiguration(config)
             }, onClose: { [weak self] in self?.settingsWindow = nil })

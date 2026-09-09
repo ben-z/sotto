@@ -4,6 +4,10 @@ import SottoCore
 /// Built on demand and released on close; the configuration file stays canonical.
 @MainActor
 final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDelegate, NSTextFieldDelegate {
+    private let updates: UpdateChecker
+    private let updateStatus = NSTextField(labelWithString: "")
+    private let checkUpdates = NSButton(title: "Check for Updates", target: nil, action: nil)
+    private let downloadUpdate = NSButton(title: "Download Update…", target: nil, action: nil)
     private let original: Configuration
     private var draft: Configuration
     private let defaults = Configuration(recordingsDirectory: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Sotto").path)
@@ -28,7 +32,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     private let folder = NSTextField(labelWithString: "")
     private let logs = LogsView(frame: .zero)
 
-    init(configuration: Configuration, configurationURL: URL, onSave: @escaping (Configuration) throws -> Void, onClose: @escaping () -> Void) {
+    init(configuration: Configuration, configurationURL: URL, updates: UpdateChecker, onSave: @escaping (Configuration) throws -> Void, onClose: @escaping () -> Void) {
+        self.updates = updates
         shortcut = ShortcutButton(configuration: configuration)
         draft = configuration
         original = configuration; saveConfiguration = onSave; didClose = onClose
@@ -77,6 +82,17 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         let build = label(BuildInfo.version)
         build.isSelectable = true
         build.textColor = .secondaryLabelColor
+        checkUpdates.target = updates; checkUpdates.action = #selector(UpdateChecker.check)
+        downloadUpdate.target = updates; downloadUpdate.action = #selector(UpdateChecker.download)
+        let versionRow = NSStackView(views: [build, checkUpdates])
+        versionRow.orientation = .horizontal; versionRow.spacing = 8
+        updateStatus.font = .systemFont(ofSize: 11)
+        updateStatus.textColor = .secondaryLabelColor
+        updateStatus.lineBreakMode = .byTruncatingTail
+        let updateRow = NSStackView(views: [updateStatus, downloadUpdate])
+        updateRow.orientation = .vertical; updateRow.alignment = .leading; updateRow.spacing = 4
+        updates.onChange = { [weak self] in self?.refreshUpdates() }
+        refreshUpdates()
         let d = defaults
         let defaultLanguage = d.language.map { "\(Locale.current.localizedString(forLanguageCode: $0) ?? $0) (\($0))" } ?? "Automatic detection"
         duration.stringValue = String(configuration.maxRecordingSeconds)
@@ -87,7 +103,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         let durationRow = NSStackView(views: [duration, label("seconds · 1–3,600")])
         durationRow.orientation = .horizontal; durationRow.spacing = 8
         let grid = NSGridView(views: [
-            [label("Version"), build, NSGridCell.emptyContentView],
+            [label("Version"), versionRow, NSGridCell.emptyContentView],
+            [NSGridCell.emptyContentView, updateRow, NSGridCell.emptyContentView],
             settingRow("Language", control: language, caption: defaultLanguage, matches: { $0.language == d.language }, reset: { $0.language = d.language }),
             settingRow("Model", control: model, caption: d.model, matches: { $0.model == d.model }, reset: { $0.model = d.model }),
             settingRow("Shortcut", control: shortcut, caption: Hotkey.displayName(d), matches: { $0.hotkeyKeyCode == d.hotkeyKeyCode && $0.hotkeyModifiers == d.hotkeyModifiers }, reset: { $0.hotkeyKeyCode = d.hotkeyKeyCode; $0.hotkeyModifiers = d.hotkeyModifiers }),
@@ -296,6 +313,13 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         alert.beginSheetModal(for: window)
     }
 
+    private func refreshUpdates() {
+        updateStatus.stringValue = updates.statusItem.title
+        updateStatus.toolTip = updates.statusItem.toolTip ?? updates.statusItem.title
+        checkUpdates.isEnabled = updates.checkItem.isEnabled
+        downloadUpdate.isHidden = updates.downloadItem.isHidden
+    }
+
     private func updateButtons() {
         let config = editedConfiguration
         for row in resetRows {
@@ -315,7 +339,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         updateButtons()
         guard let window else { return }
         let tab = tabViewItem?.identifier as? String
-        let height: CGFloat = tab == "settings" ? 820 : (tab == "logs" ? 400 : 650)
+        let height: CGFloat = tab == "settings" ? 850 : (tab == "logs" ? 400 : 650)
         var frame = window.frame
         let contentHeight = window.contentRect(forFrameRect: frame).height
         frame.origin.y += contentHeight - height
@@ -328,6 +352,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     }
     func windowWillClose(_ notification: Notification) {
         diagnostics.cancelCheck()
+        updates.onChange = nil
         NSApp.setActivationPolicy(.accessory)
         didClose()
     }
