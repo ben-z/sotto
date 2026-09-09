@@ -1,6 +1,7 @@
 import Foundation
 
-public struct RecordingRecord: Codable, Sendable {
+public struct RecordingRecord: Codable, Sendable, Identifiable {
+    public var title: String?
     public var id: String
     public var startedAt: Date
     public var status: String

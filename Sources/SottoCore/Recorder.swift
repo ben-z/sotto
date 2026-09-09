@@ -14,7 +14,7 @@ public final class Recorder: NSObject, AVAudioRecorderDelegate {
     public func start(at url: URL, bitRate: Int) throws {
         guard recorder == nil else { throw SottoError("Already recording.") }
         #if os(iOS)
-        try AVAudioSession.sharedInstance().setCategory(.record, mode: .default)
+        try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try AVAudioSession.sharedInstance().setActive(true)
         #endif
         let value = try AVAudioRecorder(url: url, settings: [

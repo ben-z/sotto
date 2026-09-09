@@ -1,0 +1,45 @@
+name: iOS
+on:
+  push:
+    branches: [main, ios-voice-notes]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify toolchain and create test device
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          device=$(xcrun simctl create 'Sotto CI' com.apple.CoreSimulator.SimDeviceType.iPhone-16 com.apple.CoreSimulator.SimRuntime.iOS-18-5)
+          echo "SOTTO_TEST_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+      - name: Core tests
+        run: swift test
+      - name: Record, edit, and recover a note
+        run: |
+          xcodebuild -project iOS/Sotto.xcodeproj -scheme Sotto \
+            -destination "platform=iOS Simulator,id=$SOTTO_TEST_DEVICE" \
+            -derivedDataPath .build/ios CODE_SIGN_IDENTITY=- \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 90 \
+            -maximum-test-execution-time-allowance 120 \
+            -resultBundlePath work/ios-tests.xcresult test
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-test-results
+          path: work/ios-tests.xcresult
+          if-no-files-found: error

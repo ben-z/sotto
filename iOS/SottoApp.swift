@@ -1,171 +1,368 @@
 import SwiftUI
-import UniformTypeIdentifiers
+import AVFoundation
+import AppIntents
+import Network
 import SottoCore
 
 @main
 struct SottoNotesApp: App {
-    @StateObject private var store = NotesStore()
+    @StateObject private var store = NotesStore.shared
+    @Environment(\.scenePhase) private var phase
     var body: some Scene {
         WindowGroup {
             Group {
-                if let session = store.session { NotesView(session: session, store: store).id(ObjectIdentifier(session)) }
-                else {
-                    VStack {
-                        ContentUnavailableView("Sotto could not start", systemImage: "exclamationmark.triangle", description: Text(store.error ?? "Loading"))
-                        if store.error != nil { Button("Reset configuration · keep recordings") { store.resetConfiguration() } }
-                    }
-                }
-            }.task { store.load() }
+                if let library = store.library { NotesView(store: store, library: library) }
+                else { ContentUnavailableView("Cannot open notes", systemImage: "exclamationmark.triangle", description: Text(store.error ?? "Loading notes")) }
+            }
+            .onChange(of: phase) { _, value in
+                if value == .active { store.resume() }
+                if value == .background { store.suspend() }
+            }
         }
     }
 }
 
 @MainActor
-final class NotesStore: ObservableObject {
-    @Published var session: Session?
+final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    static let shared = NotesStore()
+    @Published var library: NoteLibrary?
+    @Published var recording: RecordingRecord?
+    @Published var preparing = false
     @Published var error: String?
-    private let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Sotto")
+    @Published var playingID: String?
+    @Published var keyStored = false
+    private let recorder = Recorder()
+    private var player: AVAudioPlayer?
+    private var worker: Task<Void, Never>?
+    private var deadline: Task<Void, Never>?
+    private let network = NWPathMonitor()
     private var scopedFolder: URL?
-
-    func resetConfiguration() {
-        do {
-            let config = Configuration(recordingsDirectory: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Recordings").path)
-            try config.save(to: support.appendingPathComponent("config.json"))
-            let bookmark = support.appendingPathComponent("folder.bookmark")
-            if FileManager.default.fileExists(atPath: bookmark.path) { try FileManager.default.removeItem(at: bookmark) }
-            scopedFolder?.stopAccessingSecurityScopedResource(); scopedFolder = nil
-            error = nil; session = nil; load()
-        } catch { self.error = error.localizedDescription }
+    var model: String { UserDefaults.standard.string(forKey: "notes.model") ?? "whisper-large-v3-turbo" }
+    var language: String? {
+        let value = UserDefaults.standard.string(forKey: "notes.language") ?? "en"
+        return value.isEmpty ? nil : value
     }
 
-    func load() {
-        guard session == nil else { return }
+    override init() {
+        super.init()
         do {
-            try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-            let configURL = support.appendingPathComponent("config.json")
-            var config: Configuration
-            if FileManager.default.fileExists(atPath: configURL.path) { config = try Configuration.load(from: configURL) }
-            else {
-                config = Configuration(recordingsDirectory: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Recordings").path)
-                try config.save(to: configURL)
-            }
-            let bookmarkURL = support.appendingPathComponent("folder.bookmark")
-            if FileManager.default.fileExists(atPath: bookmarkURL.path) {
+            var directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Recordings")
+            let bookmark = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Sotto/folder.bookmark")
+            if FileManager.default.fileExists(atPath: bookmark.path) {
                 var stale = false
-                let folder = try URL(resolvingBookmarkData: Data(contentsOf: bookmarkURL), options: [], bookmarkDataIsStale: &stale)
-                guard !stale, folder.startAccessingSecurityScopedResource() else { throw SottoError("Recording folder permission expired. Re-select the folder using Settings after restoring access.") }
-                scopedFolder = folder
-                config.recordingsDirectory = folder.path
-            } else {
-                // iOS may relocate its app container across installs/updates.
-                config.recordingsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Recordings").path
+                let folder = try URL(resolvingBookmarkData: Data(contentsOf: bookmark), bookmarkDataIsStale: &stale)
+                guard !stale, folder.startAccessingSecurityScopedResource() else { throw SottoError("The saved recording folder is unavailable. Restore its access before opening notes.") }
+                scopedFolder = folder; directory = folder
             }
-            session = try Session(configuration: config)
+            library = try NoteLibrary(directory: directory)
+        } catch { self.error = error.localizedDescription }
+        refreshKey()
+        NotificationCenter.default.addObserver(self, selector: #selector(audioInterrupted(_:)), name: AVAudioSession.interruptionNotification, object: nil)
+        recorder.onUnexpectedStop = { [weak self] message in
+            self?.finish()
+            if let message { self?.error = message }
+        }
+        network.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor in self?.resume() }
+        }
+        network.start(queue: DispatchQueue(label: "dev.sotto.notes.network"))
+    }
+
+    @objc private func audioInterrupted(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
+        finish()
+    }
+
+    func refreshKey() {
+        switch GroqKeychain.storageStatus() {
+        case .stored, .authorizationRequired: keyStored = true
+        case .missing: keyStored = false
+        case .failure(let code): error = "Keychain could not be read (\(code))."
+        }
+    }
+
+    func toggleRecording() async {
+        if recording != nil { finish(); return }
+        guard !preparing, let library else { return }
+        preparing = true; error = nil; stopPlayback()
+        defer { preparing = false }
+        guard await Recorder.requestPermission() else {
+            error = "Allow microphone access in iPhone Settings → Sotto to record a note."; return
+        }
+        do {
+            let note = try library.create(model: model, language: language)
+            do { try recorder.start(at: library.archive.audioURL(note), bitRate: 32000) }
+            catch {
+                var failed = note; failed.status = "interrupted"; failed.error = error.localizedDescription
+                try library.save(failed); throw error
+            }
+            recording = note
+            deadline = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(1800)); self?.finish() } catch { }
+            }
         } catch { self.error = error.localizedDescription }
     }
 
-    func selectFolder(_ url: URL) throws {
-        guard let old = session, [.idle, .error].contains(old.state) else { throw SottoError("Finish the current recording first.") }
-        guard url.startAccessingSecurityScopedResource() else { throw SottoError("Cannot access the chosen folder.") }
+    func finish() {
+        guard let note = recording, let library else { return }
+        deadline?.cancel(); deadline = nil; error = nil
         do {
-            let bookmark = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-            var config = old.configuration; config.recordingsDirectory = url.path
-            let replacement = try Session(configuration: config)
-            try bookmark.write(to: support.appendingPathComponent("folder.bookmark"), options: .atomic)
-            scopedFolder?.stopAccessingSecurityScopedResource(); scopedFolder = url
-            session = replacement
-        } catch { url.stopAccessingSecurityScopedResource(); throw error }
+            let duration = try recorder.stop()
+            recording = nil
+            try library.queue(note, duration: duration)
+            resume()
+        } catch { recording = nil; self.error = error.localizedDescription }
+    }
+
+    func resume() {
+        guard worker == nil, let library, keyStored, UIApplication.shared.applicationState == .active else { return }
+        worker = Task { [weak self] in
+            await library.process(key: { try GroqKeychain.read() }) { url, key, note in
+                try await GroqClient().transcribe(file: url, key: key, model: note.model, language: note.language, prompt: note.prompt)
+            }
+            self?.worker = nil
+        }
+    }
+
+    func suspend() {
+        // Active recording uses the audio background mode; uploads resume on foreground.
+        stopPlayback(); worker?.cancel()
+    }
+
+    func deleteKey() throws {
+        try GroqKeychain.delete(); refreshKey(); worker?.cancel()
+    }
+
+    func retry(_ note: RecordingRecord) {
+        do { try library?.queue(note); resume() } catch { self.error = error.localizedDescription }
+    }
+
+    func play(_ note: RecordingRecord) {
+        if playingID == note.id { stopPlayback(); return }
+        guard recording == nil, let library else { return }
+        do {
+            stopPlayback()
+            try AVAudioSession.sharedInstance().setCategory(.playback)
+            try AVAudioSession.sharedInstance().setActive(true)
+            let value = try AVAudioPlayer(contentsOf: library.archive.audioURL(note))
+            value.delegate = self
+            guard value.play() else { throw SottoError("This recording could not be played.") }
+            player = value; playingID = note.id
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func stopPlayback() {
+        guard player != nil else { return }
+        player?.stop(); player = nil; playingID = nil
+        do { try AVAudioSession.sharedInstance().setActive(false) } catch { self.error = error.localizedDescription }
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            self.stopPlayback()
+            if !flag { self.error = "Playback stopped unexpectedly. The original audio is retained." }
+        }
+    }
+}
+
+struct RecordVoiceNote: AppIntent {
+    static let title: LocalizedStringResource = "Record a voice note"
+    static let description = IntentDescription("Open Sotto and start recording. Run again to stop and save.")
+    static let openAppWhenRun = true
+    @MainActor func perform() async throws -> some IntentResult {
+        await NotesStore.shared.toggleRecording()
+        if let error = NotesStore.shared.error { throw SottoError(error) }
+        return .result()
+    }
+}
+
+struct SottoShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(intent: RecordVoiceNote(), phrases: ["Record a note in \(.applicationName)"], shortTitle: "Record a voice note", systemImageName: "mic")
+    }
+}
+
+private func title(_ note: RecordingRecord) -> String {
+    if let title = note.title, !title.isEmpty { return title }
+    return "Voice note"
+}
+
+private func status(_ note: RecordingRecord, keyStored: Bool) -> String {
+    switch note.status {
+    case "recording": "Recording"
+    case "queued": keyStored ? "Waiting to transcribe" : "Audio saved · Add a Groq key to transcribe"
+    case "transcribing": "Transcribing"
+    case "complete": "Transcribed"
+    case "interrupted": "Recording interrupted"
+    default: "Transcription needs attention"
     }
 }
 
 struct NotesView: View {
-    @ObservedObject var session: Session
     @ObservedObject var store: NotesStore
-    @State private var key = ""
+    @ObservedObject var library: NoteLibrary
     @State private var settings = false
-    @State private var folderPicker = false
-    @State private var files: [URL] = []
-    @State private var error: String?
-    @Environment(\.scenePhase) private var scenePhase
-
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Text(session.message).font(.caption).textSelection(.enabled)
-                    Button(session.state == .recording ? "Stop and transcribe" : "Record note", systemImage: session.state == .recording ? "stop.circle.fill" : "mic.circle.fill") {
-                        Task {
-                            if session.state == .recording { await session.finish() }
-                            else { await session.begin() }
-                        }
-                    }.disabled(session.state == .transcribing || session.state == .preparing)
-                    if session.state == .recording || session.state == .transcribing {
-                        Button("Cancel · keep audio", role: .cancel) { Task { await session.cancel() } }
+                if library.notes.isEmpty {
+                    ContentUnavailableView("Your thoughts, recorded", systemImage: "waveform", description: Text("Record a voice note. Audio stays on this iPhone; Groq turns it into text when you’re connected."))
+                        .listRowBackground(Color.clear)
+                }
+                ForEach(library.notes) { note in
+                    NavigationLink {
+                        NoteView(store: store, library: library, id: note.id)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(title(note)).font(.headline)
+                            Text(note.startedAt, format: .dateTime.month(.abbreviated).day().hour().minute()).font(.subheadline).foregroundStyle(.secondary)
+                            Label(status(note, keyStored: store.keyStored), systemImage: note.status == "complete" ? "text.alignleft" : "waveform")
+                                .font(.caption).foregroundStyle(note.status == "recording" ? .red : .secondary)
+                        }.padding(.vertical, 5)
                     }
                 }
-                Section("Recent notes") {
-                    ForEach(files, id: \.self) { url in
-                        NavigationLink(url.deletingPathExtension().lastPathComponent) { NoteView(url: url) }
+                if let error = store.error ?? library.issue {
+                    Section { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
+                }
+            }
+            .navigationTitle("Notes")
+            .toolbar { Button("Settings", systemImage: "gearshape") { settings = true } }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 10) {
+                    if let note = store.recording {
+                        Text(note.startedAt, style: .timer).monospacedDigit().font(.title2)
+                        Text("Recording · Audio stays on this iPhone").font(.caption).foregroundStyle(.secondary)
                     }
-                    if files.isEmpty { Text("Record a note to get started.").foregroundStyle(.secondary) }
-                }
-                if let error { Text(error).foregroundStyle(.red) }
+                    Button { Task { await store.toggleRecording() } } label: {
+                        Label(store.recording == nil ? "Record a note" : "Stop recording", systemImage: store.recording == nil ? "mic.fill" : "stop.fill")
+                            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 10)
+                    }.buttonStyle(.borderedProminent).tint(store.recording == nil ? .accentColor : .red)
+                        .disabled(store.preparing).accessibilityIdentifier("record-note")
+                }.padding().background(.bar)
             }
-            .navigationTitle("Sotto")
-            .toolbar { Button("Settings", systemImage: "gear") { settings = true } }
-            .task { refresh() }
-            .onChange(of: session.lastTranscript) { refresh() }
-            .onChange(of: scenePhase) { _, phase in
-                // First version is foreground-only. Finalize the file when
-                // leaving, instead of risking a suspended unfinished recording.
-                if phase == .background { Task { await session.cancel() } }
-            }
-            .sheet(isPresented: $settings) {
-                NavigationStack {
-                    Form {
-                        Section("Groq") {
-                            SecureField("API key", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            Button("Save key to Keychain") {
-                                do { try GroqKeychain.save(key); key = ""; error = nil; settings = false }
-                                catch { self.error = error.localizedDescription }
-                            }
-                        }
-                        Section("Keep all audio") {
-                            Text(session.archive.directory.path).font(.caption).textSelection(.enabled)
-                            Button("Choose recording folder") { folderPicker = true }
-                                .disabled(![.idle, .error].contains(session.state))
-                            Text("AAC audio, transcript, and diagnostics stay together. The default folder is available in Files → On My iPhone → Sotto.").font(.caption)
-                        }
-                        if let error { Text(error).foregroundStyle(.red) }
-                    }.navigationTitle("Settings")
-                        .toolbar { Button("Done") { settings = false } }
-                }
-            }
-            .fileImporter(isPresented: $folderPicker, allowedContentTypes: [.folder]) { result in
-                do { try store.selectFolder(result.get()); settings = false; refresh() }
-                catch { self.error = error.localizedDescription }
-            }
+            .sheet(isPresented: $settings) { SettingsView(store: store) }
         }
-    }
-
-    private func refresh() {
-        do {
-            files = try FileManager.default.contentsOfDirectory(at: session.archive.directory, includingPropertiesForKeys: nil)
-                .filter { $0.pathExtension == "txt" }.sorted { $0.lastPathComponent > $1.lastPathComponent }.prefix(50).map { $0 }
-        } catch { self.error = error.localizedDescription }
     }
 }
 
 struct NoteView: View {
-    let url: URL
-    @State private var text = ""
+    @ObservedObject var store: NotesStore
+    @ObservedObject var library: NoteLibrary
+    let id: String
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var draftTitle = ""
+    @State private var error: String?
+    private var note: RecordingRecord? { library.notes.first { $0.id == id } }
     var body: some View {
-        ScrollView { Text(text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
-            .navigationTitle("Note")
-            .toolbar { ShareLink(item: url) }
-            .task {
-                do { text = try String(contentsOf: url, encoding: .utf8) }
-                catch { text = "Cannot read note: \(error.localizedDescription)" }
+        if let note {
+            List {
+                Section {
+                    Text(note.startedAt, format: .dateTime.month(.wide).day().year().hour().minute()).foregroundStyle(.secondary)
+                    HStack {
+                        Button(store.playingID == id ? "Stop playback" : "Play recording", systemImage: store.playingID == id ? "stop.fill" : "play.fill") { store.play(note) }
+                            .disabled(store.recording != nil)
+                        Spacer()
+                        if let seconds = note.durationSeconds { Text(Duration.seconds(seconds), format: .time(pattern: .minuteSecond)).monospacedDigit().foregroundStyle(.secondary) }
+                    }
+                    ShareLink("Share audio", item: library.archive.audioURL(note))
+                }
+                Section("Note") {
+                    switch Result(catching: { try library.text(for: note) }) {
+                    case .success(let text):
+                        if text.isEmpty { Text(status(note, keyStored: store.keyStored)).foregroundStyle(.secondary) }
+                        else { Text(text).textSelection(.enabled); ShareLink("Share note", item: text) }
+                    case .failure(let error):
+                        Text("Cannot read note: \(error.localizedDescription)").foregroundStyle(.red)
+                    }
+                    if let message = note.error { Text(message).font(.caption).foregroundStyle(.red) }
+                    if ["failed", "interrupted", "queued"].contains(note.status) {
+                        Button("Transcribe recording") { store.retry(note) }.disabled(!store.keyStored || library.transcribingID == id)
+                    }
+                }
+                if let error = error ?? store.error { Text(error).foregroundStyle(.red) }
             }
+            .navigationTitle(title(note)).navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                Button("Edit") {
+                    do { draft = try library.text(for: note); draftTitle = note.title ?? ""; editing = true }
+                    catch { self.error = error.localizedDescription }
+                }
+            }
+            .onDisappear { store.stopPlayback() }
+            .sheet(isPresented: $editing) {
+                NavigationStack {
+                    Form {
+                        TextField("Title", text: $draftTitle)
+                        TextEditor(text: $draft).frame(minHeight: 250).accessibilityLabel("Note text")
+                        if let error { Text(error).foregroundStyle(.red) }
+                    }.navigationTitle("Edit note").navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editing = false } }
+                            ToolbarItem(placement: .confirmationAction) { Button("Save") {
+                                do { try library.saveText(draft, for: note); try library.rename(note, to: draftTitle); editing = false }
+                                catch { self.error = error.localizedDescription }
+                            } }
+                        }
+                }
+            }
+        }
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject var store: NotesStore
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("notes.model") private var model = "whisper-large-v3-turbo"
+    @AppStorage("notes.language") private var language = "en"
+    @State private var key = ""
+    @State private var checking = false
+    @State private var message: String?
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Transcription") {
+                    Text(store.keyStored ? "API key saved in this iPhone’s Keychain" : "Add a Groq API key to transcribe your recordings.")
+                    SecureField(store.keyStored ? "Replace API key" : "Groq API key", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button(checking ? "Checking key…" : "Save and check key") {
+                        Task {
+                            checking = true; message = nil
+                            defer { checking = false }
+                            do {
+                                try await GroqClient().verifyKey(key.trimmingCharacters(in: .whitespacesAndNewlines), model: model)
+                                try GroqKeychain.save(key); key = ""; store.refreshKey(); store.resume()
+                                message = "Key verified and saved. Queued recordings will transcribe automatically."
+                            } catch { message = error.localizedDescription }
+                        }
+                    }.disabled(checking || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Link("Create a Groq API key", destination: URL(string: "https://console.groq.com/keys")!)
+                    if store.keyStored {
+                        Button("Delete API key", role: .destructive) {
+                            do { try store.deleteKey(); message = "API key deleted. Your recordings are retained." }
+                            catch { message = error.localizedDescription }
+                        }
+                    }
+                    if let message { Text(message).font(.caption).textSelection(.enabled) }
+                }
+                Section {
+                    Picker("Language", selection: $language) { Text("English").tag("en"); Text("Detect automatically").tag("") }
+                    Picker("Model", selection: $model) {
+                        Text("whisper-large-v3-turbo").tag("whisper-large-v3-turbo")
+                        Text("whisper-large-v3").tag("whisper-large-v3")
+                    }
+                } footer: { Text("Applies to new recordings. Audio is sent to Groq for transcription using your key.") }
+                Section("Storage") {
+                    Text("Recordings and notes are saved in Files → On My iPhone → Sotto → Recordings.")
+                    Text("Audio, the original transcript, and your edits are kept together. Back up this folder before deleting the app.").font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Action Button") {
+                    Text("In iPhone Settings → Action Button, choose Shortcut, then Sotto → Record a voice note.")
+                    Text("The shortcut opens Sotto to record. Run it again or tap Stop to save. Recording continues when you lock your iPhone. Tap Stop in Sotto to finish.").font(.caption).foregroundStyle(.secondary)
+                }
+            }.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
+                .toolbar { Button("Done") { dismiss() } }
+        }
     }
 }
