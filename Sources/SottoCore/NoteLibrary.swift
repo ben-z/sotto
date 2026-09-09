@@ -93,7 +93,7 @@ public final class NoteLibrary: ObservableObject {
                 try save(note)
                 transcribingID = note.id
                 let result = try await transcribe(archive.audioURL(note), secret, note)
-                try Task.checkCancellation()
+                // Persist a returned result even if cancellation arrived with it.
                 // Preserve metadata edits made while the upload was running.
                 note = notes.first { $0.id == candidate.id } ?? note
                 try archive.complete(&note, with: result)

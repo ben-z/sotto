@@ -139,3 +139,20 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
         Issue.record("Corrupt metadata must be reported")
     } catch { #expect(error.localizedDescription.contains("broken.json")) }
 }
+
+@MainActor @Test func completedResponseSurvivesLateCancellation() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let note = try queuedNote(library)
+    let task = Task {
+        await library.process(key: { "fixture" }) { _, _, _ in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return TranscriptionResult(text: "Already received", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
+        }
+    }
+    await task.value
+    #expect(library.notes.first?.status == "complete")
+    #expect(try library.text(for: note) == "Already received")
+    #expect(library.issue == nil)
+}
