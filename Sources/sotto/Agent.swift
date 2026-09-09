@@ -67,24 +67,7 @@ final class Agent: NSObject, NSApplicationDelegate {
             guard let resources = Bundle.main.resourceURL else { throw SottoError("Sotto app resources are missing.") }
             artwork = try SottoStatusArtwork(resourceDirectory: resources.appendingPathComponent("SottoStatus"))
             item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-            let menu = NSMenu()
-            menu.autoenablesItems = false
-            statusLine.isEnabled = false
-            menu.addItem(statusLine)
-            menu.addItem(.separator())
-            for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Copy Last Transcript", #selector(copyLastTranscript)), ("Open Recordings", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("About Sotto", #selector(about)), ("Quit", #selector(quit))] {
-                let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
-                entry.target = self; menu.addItem(entry)
-                if action == #selector(toggle) { recordingAction = entry }
-                if action == #selector(cancel) { cancelAction = entry }
-                if action == #selector(copyLastTranscript) { copyAction = entry }
-            }
-            menu.insertItem(.separator(), at: menu.numberOfItems - 1)
-            for entry in [updates.statusItem, updates.checkItem, updates.downloadItem] {
-                menu.insertItem(entry, at: menu.numberOfItems - 1)
-            }
-            menu.insertItem(.separator(), at: menu.numberOfItems - 1)
-            item?.menu = menu
+            item?.menu = makeStatusMenu()
             connectSession()
             installSignal(SIGUSR1) { [weak self] in self?.toggle() }
             installSignal(SIGUSR2) { [weak self] in self?.cancel() }
@@ -103,6 +86,25 @@ final class Agent: NSObject, NSApplicationDelegate {
             CLI.showStartupError(error)
             exit(1)
         }
+    }
+
+    func makeStatusMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        statusLine.isEnabled = false
+        menu.addItem(statusLine)
+        for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Copy Last Transcript", #selector(copyLastTranscript)), ("Open Recordings", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("Quit Sotto", #selector(quit))] {
+            if action == #selector(copyLastTranscript) || action == #selector(editConfig) {
+                menu.addItem(.separator())
+            }
+            if action == #selector(editConfig) { menu.addItem(updates.downloadItem) }
+            let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            entry.target = self; menu.addItem(entry)
+            if action == #selector(toggle) { recordingAction = entry }
+            if action == #selector(cancel) { cancelAction = entry }
+            if action == #selector(copyLastTranscript) { copyAction = entry }
+        }
+        return menu
     }
 
     private func installSignal(_ number: Int32, action: @escaping @MainActor () -> Void) {
@@ -196,25 +198,30 @@ final class Agent: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func update() {
-        if let item {
-            artwork?.apply(SottoStatusArtwork.State(rawValue: session.state.rawValue)!, to: item)
-            item.button?.imagePosition = .imageLeading
-            item.button?.setAccessibilityValue(session.message)
-        }
-        switch session.state {
+    func updateMenu(state: Session.State, hasTranscript: Bool) {
+        switch state {
         case .idle: statusLine.title = "Ready · " + Hotkey.displayName(session.configuration)
         case .preparing: statusLine.title = "Preparing microphone…"
         case .recording: statusLine.title = "Recording…"
         case .transcribing: statusLine.title = "Transcribing…"
         case .error: statusLine.title = "Needs attention · open Settings"
         }
+        statusLine.isHidden = state == .idle || state == .recording
         statusLine.toolTip = session.message
-        let capturing = session.state == .recording || session.state == .preparing
+        let capturing = state == .recording || state == .preparing
         recordingAction?.title = capturing ? "Stop Recording" : "Start Recording · " + Hotkey.displayName(session.configuration)
-        recordingAction?.isEnabled = session.state != .transcribing
-        cancelAction?.isEnabled = capturing || session.state == .transcribing
-        copyAction?.isEnabled = !session.lastTranscript.isEmpty
+        recordingAction?.isHidden = state == .transcribing
+        cancelAction?.isHidden = !capturing && state != .transcribing
+        copyAction?.isEnabled = hasTranscript
+    }
+
+    private func update() {
+        if let item {
+            artwork?.apply(SottoStatusArtwork.State(rawValue: session.state.rawValue)!, to: item)
+            item.button?.imagePosition = .imageLeading
+            item.button?.setAccessibilityValue(session.message)
+        }
+        updateMenu(state: session.state, hasTranscript: !session.lastTranscript.isEmpty)
         item?.button?.toolTip = session.message
         item?.button?.title = session.state == .recording ? " REC" : ""
         indicator.update(session.state)

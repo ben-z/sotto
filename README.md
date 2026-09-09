@@ -73,7 +73,7 @@ Native development UI captured with example paths. See [how the images are gener
 
 Sotto checks GitHub at launch and once daily while running. A newer version appears **inside the menu**, with **Download Sotto…** opening its release page. Download and install updates when you’re ready.
 
-Turn off **Updates** in Settings to disable automatic checks. **Check for Updates** is available beside the version in Settings and in the menu, including when automatic checks are disabled. Checks send no recordings, transcripts, or Groq key. Check results appear in Settings and the menu. If a release is still building, Sotto says its download is being prepared; the download button appears once the app ZIP is ready. Connection failures are also recorded in native logs.
+Turn off **Updates** in Settings to disable automatic checks. **Check for Updates** is available beside the version in Settings, including when automatic checks are disabled. Checks send no recordings, transcripts, or Groq key. Check results appear in Settings; the menu shows a download action when an update is ready. If a release is still building, Sotto says its download is being prepared; the download button appears once the app ZIP is ready. Connection failures are also recorded in native logs.
 
 To install an update, finish your recording, quit Sotto, extract the new ZIP, and replace the app in the **same location**. Reopen it. Your key, configuration, and recordings live outside the app and are preserved. Ad-hoc signing means macOS may ask for microphone, Accessibility, or Keychain approval again. If auto-paste stops working, the Status tab explains how to refresh the Accessibility entry.
 
