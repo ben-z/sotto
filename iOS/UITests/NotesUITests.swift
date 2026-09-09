@@ -37,7 +37,7 @@ final class NotesUITests: XCTestCase {
         app.buttons["Cancel"].tap()
         XCTAssertTrue(fixture.exists)
         fixture.swipeLeft()
-        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.buttons["Delete permanently"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
         XCTAssertTrue(fixture.exists)
     }
