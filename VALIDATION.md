@@ -92,3 +92,8 @@ The running app bundle was not replaced during this review, to avoid another dev
 - CI now packages and uploads ad-hoc-signed native app ZIPs and SHA-256 checksums after each architecture job's checks pass. The signed/notarized tag-release workflow remains separate and still requires its credentials.
 - The packaging script verifies ad-hoc signing and the expected architecture, then extracts the ZIP and reruns packaged-app checks, including CLI launch. Local arm64 packaging and extraction verification passed.
 - README explains artifact selection, GitHub sign-in, extraction, no Apple Developer account/Xcode requirement for running prebuilt apps, first-launch approval, and development permission churn.
+
+## Automatic release attachments — September 8, 2026
+
+- Publishing a GitHub release now triggers the full two-architecture checks and attaches a universal app ZIP plus SHA256SUMS. Default mode is explicitly ad-hoc; `SOTTO_NOTARIZE=true` explicitly selects the credential-required notarized path, with no fallback.
+- Six release preflight checks passed. Local `scripts/release.sh --adhoc` built both architectures without Apple credentials, then extracted and verified the packaged app. Updated README, release notes, and release instructions to distinguish personal-use downloads from notarized distribution.

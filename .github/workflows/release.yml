@@ -1,7 +1,7 @@
 name: Release
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
 permissions:
   contents: read
 concurrency:
@@ -13,10 +13,13 @@ jobs:
   publish:
     needs: test
     runs-on: macos-15
+    timeout-minutes: 20
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      NOTARIZE: ${{ vars.SOTTO_NOTARIZE || 'false' }}
       SOTTO_SIGNING_IDENTITY: ${{ secrets.SOTTO_SIGNING_IDENTITY }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -27,7 +30,15 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      - name: Validate release mode and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          test "$RELEASE_TAG" = "v$(cat VERSION)" || { echo 'Release tag must match VERSION' >&2; exit 1; }
+          test "$NOTARIZE" = true || test "$NOTARIZE" = false || { echo 'SOTTO_NOTARIZE must be true or false' >&2; exit 1; }
       - name: Validate prerequisites and import signing certificate
+        if: env.NOTARIZE == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -45,13 +56,17 @@ jobs:
           security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
           security list-keychains -d user -s "$keychain"
+      - name: Build ad-hoc-signed personal-use release
+        if: env.NOTARIZE == 'false'
+        run: scripts/release.sh --adhoc
       - name: Sign, notarize, staple, and verify
-        run: scripts/release.sh
-      - name: Publish verified files
+        if: env.NOTARIZE == 'true'
+        run: scripts/release.sh --notarized
+      - name: Attach verified files to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$RELEASE_TAG" --verify-tag --title "Sotto $RELEASE_TAG" --notes-file RELEASE_NOTES.md \
+          gh release upload "$RELEASE_TAG" \
             ".build/distribution/Sotto-$(cat VERSION)-macOS-universal.zip" .build/distribution/SHA256SUMS
       - name: Remove signing material
         if: always()

@@ -1,55 +1,48 @@
 # Releasing Sotto
 
-`VERSION` is the macOS marketing version, currently **0.1.0**. Tags use `v0.1.0`. The app's build number is 1; increment it for a replacement build and never overwrite a published tag. Update VERSION and RELEASE_NOTES.md before each release. The iOS prototype retains its separate Xcode project version and is not shipped by this workflow.
+`VERSION` is the macOS marketing version, currently **0.1.0**. Release tags must match it (`v0.1.0`). Update VERSION and RELEASE_NOTES.md before a new release. Never overwrite a published version; the iOS prototype is not part of this workflow.
 
-## Personal-use CI downloads
+## Automatic release assets
 
-Every successful architecture job uploads `Sotto-app-ARM64` or `Sotto-app-X64` after tests, resource checks, and artwork validation. Each artifact contains an ad-hoc-signed native app ZIP and its SHA-256 checksum. Packaging re-extracts the ZIP and verifies the app signature, required resources, and CLI launch before upload. These downloads need no Apple Developer account or CI signing secrets; GitHub sign-in is needed to download artifacts.
+Publish a GitHub release using the website or:
 
-These are explicitly unnotarized development builds. They do not use the signed release workflow below, do not create version tags or GitHub Releases, and are subject to Actions artifact retention. macOS may require an explicit first-launch approval and renewed permissions after updates.
+```sh
+gh release create v0.1.0 --target main --title "Sotto v0.1.0" --notes-file RELEASE_NOTES.md
+```
 
-## Signing
+The **published release** event runs tests and resource checks on Apple Silicon and Intel, then builds a universal app, packages it, re-extracts it, verifies the signature/resources/executable, and attaches `Sotto-0.1.0-macOS-universal.zip` and `SHA256SUMS` to that release. Assets appear after the workflow succeeds. A bare tag push does not publish a release or start attachment; publishing a draft does. Downloads from public release assets do not require a GitHub account.
 
-Local builds use free ad-hoc signing. Public macOS distribution uses a **Developer ID Application** certificate from an Apple Developer Program membership and Apple's notarization service. Apple lists membership at US$99/year (or local currency). This workflow does not publish an unsigned fallback.
+By default these are **ad-hoc-signed personal-use builds**, with no Apple account or signing secrets required. They are not Apple-notarized. State that clearly in release notes; macOS may require first-launch approval and renewed permissions after updates. The workflow fails on invalid mode/version, failed tests, packaging, or upload; it does not overwrite existing assets. Publish a new version to replace a released build.
 
-Create a Developer ID Application certificate in your Apple developer account, install it with its private key, then export the identity as a password-protected `.p12` from Keychain Access. Do not commit certificates, passwords, or keys.
+Local equivalent (creates files but does not publish):
 
-Configure these GitHub Actions repository secrets:
+```sh
+scripts/release.sh --adhoc
+```
+
+## Optional Developer ID signing and notarization
+
+Set the repository Actions variable `SOTTO_NOTARIZE` to exactly `true` to request notarized releases. The default is `false`. An invalid value fails. There is **no fallback** if notarization was requested but credentials are missing or Apple rejects the submission.
+
+Create a **Developer ID Application** certificate through the Apple Developer Program, install it with its private key, and export that identity as a password-protected `.p12`. Configure these Actions secrets:
 
 | Secret | Value |
 | --- | --- |
-| `CERTIFICATE_P12_BASE64` | Base64 encoding of the exported certificate **and private key** |
-| `CERTIFICATE_PASSWORD` | Nonempty password used to export the `.p12` |
+| `CERTIFICATE_P12_BASE64` | Base64 certificate **and private key** export |
+| `CERTIFICATE_PASSWORD` | Nonempty export password |
 | `SOTTO_SIGNING_IDENTITY` | Full `Developer ID Application: Name (TEAMID)` identity |
 | `APPLE_ID` | Apple account used for notarization |
 | `APPLE_TEAM_ID` | Developer team ID |
-| `APPLE_APP_PASSWORD` | Apple app-specific password for notarization |
+| `APPLE_APP_PASSWORD` | App-specific password for notarization |
 
-The workflow imports the identity into a temporary runner Keychain and deletes it and the `.p12` afterward. Signing uses the hardened runtime, a timestamp, and the microphone entitlement. Missing credentials, failed tests, failed signing/notarization, or failed Gatekeeper assessment stop publication.
+The workflow uses a temporary runner Keychain, hardened runtime, timestamp, and microphone entitlement. It notarizes, staples, and checks Gatekeeper before attaching files, then removes signing material. Never commit certificates or credentials. The local equivalent is `scripts/release.sh --notarized`, with the identity installed and notarization environment variables set. Running without an explicit mode also requests notarization.
 
-## Checks
+## Development CI artifacts
 
-```sh
-swift test
-python3 scripts/test-release.py
-SOTTO_APP_PATH="$PWD/.build/ci/Sotto.app" SOTTO_UNIVERSAL=1 scripts/build.sh
-python3 scripts/check-bundle.py .build/ci/Sotto.app --universal
-python3 design/icon/source/rebuild.py --check
-```
+Every successful CI architecture job also uploads `Sotto-app-ARM64` or `Sotto-app-X64`, containing a native ad-hoc app ZIP and checksum. These are available before a release, require GitHub sign-in, and expire according to artifact retention. They are separate from public release assets.
 
-These offline tests never require a real Groq key or microphone access. CI runs on Apple Silicon and Intel macOS runners. Packaged-app checks cover version, identity, required artwork, signatures, CLI launch, and (for releases) both architectures. Manual microphone, shortcut, auto-paste, permission, and signed-download tests remain necessary; unit tests do not certify them.
+## Validation
 
-## Publish
+CI checks core behavior, diagnostics, resource budgets, release prerequisites, artwork, and packaged apps. Local release preflight tests: `python3 scripts/test-release.py`. Manual microphone, shortcut, paste, and first-install checks remain necessary; packaging checks do not certify macOS permission grants. Notarization remains unverified until real Apple credentials are configured. No Mac App Store submission or in-app updater is included.
 
-After credentials are configured and changes are committed and pushed:
-
-```sh
-git tag -a v0.1.0 -m 'Sotto v0.1.0'
-git push origin v0.1.0
-```
-
-The tag triggers tests, builds a universal app, signs it, submits it to Apple, staples the notarization ticket, and checks Gatekeeper. Only then does it create a public GitHub release with `Sotto-0.1.0-macOS-universal.zip` and `SHA256SUMS`. The tag must match VERSION. No app-store submission or automatic in-app updater is included.
-
-For a local signed dry run, set the same identity and Apple notarization variables and run `scripts/release.sh`; this creates files under `.build/distribution` but does not publish them. The identity must already exist in your local Keychain. Notarization uploads the app to Apple. Inspect `.build/distribution/notarization.json` for submission status; a failed submission must be diagnosed before rerunning.
-
-Sources: [Apple membership](https://developer.apple.com/programs/enroll/), [Developer ID](https://developer.apple.com/developer-id/), [notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [audio-input entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.audio-input).
+Sources: [Developer ID](https://developer.apple.com/developer-id/), [notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [first-launch approval](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).

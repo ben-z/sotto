@@ -30,5 +30,17 @@ class ReleasePreflight(unittest.TestCase):
             'SOTTO_SIGNING_IDENTITY': 'Developer ID Application: Test', 'APPLE_ID': 'test',
             'APPLE_TEAM_ID': 'test', 'APPLE_APP_PASSWORD': 'test', 'RELEASE_TAG': 'v999.0.0'}))
 
+    def test_explicit_adhoc_mode_needs_no_apple_credentials(self):
+        env = {'PATH': os.environ['PATH'], 'RELEASE_TAG': 'v999.0.0'}
+        result = subprocess.run([str(ROOT / 'scripts/release.sh'), '--adhoc'], cwd=ROOT, env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('tag does not match VERSION', result.stderr)
+        self.assertNotIn('Missing Developer ID', result.stderr)
+
+    def test_unknown_release_mode_fails(self):
+        result = subprocess.run([str(ROOT / 'scripts/release.sh'), '--unknown'], cwd=ROOT, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Usage:', result.stderr)
+
 if __name__ == '__main__':
     unittest.main()

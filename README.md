@@ -14,9 +14,11 @@ Named after *sotto voce*, “in a quiet voice.” Pronounced **SOH-toh**.
 
 Requires **macOS 14+** and a [Groq API key](https://console.groq.com/keys). **No Apple Developer account is needed for personal use.**
 
-Download a prebuilt app from the latest successful [CI run on main](https://github.com/ben-z/sotto/actions/workflows/ci.yml?query=branch%3Amain). Under **Artifacts**, choose **Sotto-app-ARM64** for Apple Silicon or **Sotto-app-X64** for Intel. GitHub requires sign-in to download workflow artifacts. Extract the artifact, then the enclosed `Sotto-…zip`, and move `Sotto.app` to Applications. Each download includes a SHA-256 checksum. No Xcode installation is needed to run it.
+Download the universal app ZIP from the [latest release](https://github.com/ben-z/sotto/releases/latest). It runs on both Apple Silicon and Intel Macs. Extract it and move `Sotto.app` to Applications. No Xcode installation or GitHub sign-in is needed to download a public release; a SHA-256 checksum is attached alongside the ZIP.
 
-These personal-use builds are **ad-hoc signed, not notarized by Apple**. macOS may block the first launch: after attempting to open it, use **System Settings → Privacy & Security → Open Anyway** if you trust this download. Updates can require fresh microphone, Accessibility, or Keychain approval. See [Apple's instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
+Current releases are **ad-hoc signed, not notarized by Apple**. macOS may block the first launch: after attempting to open it, use **System Settings → Privacy & Security → Open Anyway** if you trust this download. Updates can require fresh microphone, Accessibility, or Keychain approval. See [Apple's instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
+
+Development builds are also available from successful [CI runs on main](https://github.com/ben-z/sotto/actions/workflows/ci.yml?query=branch%3Amain): choose **Sotto-app-ARM64** or **Sotto-app-X64** under Artifacts. Those artifacts require GitHub sign-in and contain a nested app ZIP.
 
 To build from source instead, install **Xcode with Swift 6**:
 
@@ -91,4 +93,4 @@ See [validation notes](VALIDATION.md) for measured results and limitations, and 
 
 ## Releases
 
-Current version: **v0.1.0**. CI tests Apple Silicon and Intel builds. Version tags trigger a signed, notarized universal macOS ZIP release after verification. See [RELEASING.md](RELEASING.md) for the required Apple credentials, local checks, and publishing steps. Personal-use app downloads are published as CI artifacts without Apple credentials. The separate notarized release workflow remains blocked until signing/notarization secrets are configured.
+Current version: **v0.1.0**. Publishing a new GitHub release automatically runs checks, builds a universal app, and attaches its ZIP and checksum. Personal-use releases need no Apple credentials. Developer ID signing and notarization can be enabled explicitly later; see [RELEASING.md](RELEASING.md).
