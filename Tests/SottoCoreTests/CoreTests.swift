@@ -174,3 +174,30 @@ func rejectsInvalidLanguageCodes(_ language: String) {
     let saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as! [String: Any]
     #expect(saved["captureFocusedContext"] == nil && saved["contextHistoryCount"] == nil)
 }
+
+@Test func updateChecksDefaultOnAndPreserveOptOut() throws {
+    let config = Configuration(recordingsDirectory: "/tmp/sotto")
+    var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as? [String: Any])
+    object.removeValue(forKey: "automaticUpdateChecks")
+    let legacy = try JSONDecoder().decode(Configuration.self, from: JSONSerialization.data(withJSONObject: object))
+    #expect(legacy.automaticUpdateChecks)
+    var disabled = legacy
+    disabled.automaticUpdateChecks = false
+    #expect(try !JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(disabled)).automaticUpdateChecks)
+}
+
+@Test func updatesRequireNewerStableVersionAndReadyApp() throws {
+    func release(_ tag: String, draft: Bool = false, prerelease: Bool = false, ready: Bool = true) throws -> AppRelease {
+        let object: [String: Any] = ["tag_name": tag, "draft": draft, "prerelease": prerelease,
+            "assets": ready ? [["name": "Sotto-\(tag.dropFirst())-macOS-universal.zip", "state": "uploaded", "size": 100]] : []]
+        return try JSONDecoder().decode(AppRelease.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+    #expect(try release("v0.1.10").updateURL(currentVersion: "0.1.9")?.absoluteString == "https://github.com/ben-z/sotto/releases/tag/v0.1.10")
+    #expect(try release("v0.1.2").updateURL(currentVersion: "0.1.2") == nil)
+    #expect(try release("v0.1.2").updateURL(currentVersion: "0.2.0") == nil)
+    #expect(try release("v1.0.0", draft: true).updateURL(currentVersion: "0.1.2") == nil)
+    #expect(try release("v1.0.0-beta", prerelease: true).updateURL(currentVersion: "0.1.2") == nil)
+    #expect(throws: SottoError.self) { try release("v1.0.0", ready: false).updateURL(currentVersion: "0.1.2") }
+    #expect(throws: SottoError.self) { try release("vgarbage").updateURL(currentVersion: "0.1.2") }
+    #expect(throws: SottoError.self) { try release("v1.0.0").updateURL(currentVersion: "Development") }
+}

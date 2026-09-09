@@ -1,15 +1,10 @@
-Sotto v0.1.1 improves shortcut configuration, keyboard editing, and diagnostics.
+Sotto v0.1.3 adds quiet, configurable update checks.
 
-- Configure your shortcut directly in Settings, with a reset to Control–Command–S. Existing saved shortcuts are preserved.
-- Command–V now works in the Groq API-key field; standard text-editing shortcuts are available throughout Settings.
-- Escape cancels shortcut capture without closing Settings or discarding edits.
-- Version and Git revision appear in Settings and diagnostic exports.
-- Native macOS logging replaces custom log files. Export recent Sotto logs to a timestamped text file, or copy a Terminal command to inspect them. Recordings and transcripts are not bundled into exports.
-- A simpler diagnostics page keeps instructions visible and feedback beside each action.
-- Accessibility guidance explains how to repair stale permission entries after development builds.
+- Checks at launch and daily by default. Turn automatic checks off in Settings; manual checks remain available.
+- Update availability appears inside the Sotto menu, with a link to the release page. No popups, notification badges, automatic downloads, or installer.
+- Only stable releases with a completed app upload are offered. Failures appear in the menu and native logs without interrupting dictation.
+- CI covers offline errors, retry, cancellation, duplicate requests, disabled checks, and version comparison.
 
-Requires macOS 14 or later and your own Groq API key. The universal app supports Apple Silicon and Intel Macs. Microphone permission is required; Accessibility is needed only for auto-paste. Recordings are sent directly to Groq and retained locally.
+Download the universal ZIP below for Apple silicon and Intel Macs running macOS 14+. Existing settings, recordings, and your Groq key are preserved.
 
-The iOS prototype is not included in this release. Automatic in-app updates are not implemented.
-
-**Personal-use build:** ad-hoc signed, not notarized by Apple. No Apple Developer account is needed to use it. If macOS blocks opening it, use System Settings → Privacy & Security → Open Anyway after attempting to launch, provided you trust this download. Updates may require renewed permissions. The universal app ZIP and SHA256SUMS will appear under Assets after the release workflow finishes.
+**Personal-use build:** ad-hoc signed, not notarized by Apple. No Apple developer account is needed to use it. macOS may require Privacy & Security → Open Anyway on first launch and renewed permissions after replacing the app. The ZIP and SHA256SUMS appear after CI succeeds.

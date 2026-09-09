@@ -41,6 +41,8 @@ By default, **hold Control+Command+S** to record and release to transcribe, then
 
 Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. The menu shows the current recording state and lets you copy the last transcript again. Once permissions and a saved key are in place, launches stay quietly in the menu bar. To change the shortcut, click it in Settings, press your new combination, and choose **Save Changes**. Escape cancels shortcut entry. The change takes effect immediately. Editable settings show their defaults and mark overrides. The recording limit is editable in seconds (1–3,600); audio bitrate is shown as a read-only format detail. Reset one setting or use **Reset All to Defaults**, then **Save Changes** to apply. Resets preserve your API key and existing recordings. Under **Configuration file**, **Copy Configuration File Path** copies the JSON path and **Reveal Configuration File** selects it in Finder. Existing saved preferences are preserved when upgrading.
 
+Update checks are enabled by default: one GitHub request at launch and once daily while Sotto runs. The menu quietly shows availability and a link to the release download—no popups, notifications, automatic downloads, or installer. **Check for Updates** works manually even when automatic checks are off. Disable or reset **Updates** in Settings (`automaticUpdateChecks` in JSON). Failed checks appear in the menu and native logs; they do not interrupt dictation. Only stable releases with an uploaded app are offered. Checks send no recordings, transcripts, or Groq key.
+
 Audio is transcribed after recording stops. There is no always-on microphone, local model, or background screen capture.
 
 ## Efficiency
@@ -91,4 +93,4 @@ See [validation notes](VALIDATION.md) for measured results and limitations, and 
 
 ## Releases
 
-Current version: **v0.1.1**. Publishing a new GitHub release automatically runs checks, builds a universal app, and attaches its ZIP and checksum. Personal-use releases need no Apple credentials. Developer ID signing and notarization can be enabled explicitly later; see [RELEASING.md](RELEASING.md).
+The [latest release](https://github.com/ben-z/sotto/releases/latest) has the current version. Publishing a new GitHub release automatically runs checks, builds a universal app, and attaches its ZIP and checksum. Personal-use releases need no Apple credentials. Developer ID signing and notarization can be enabled explicitly later; see [RELEASING.md](RELEASING.md).

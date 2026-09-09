@@ -7,6 +7,7 @@ import SottoCore
 final class Agent: NSObject, NSApplicationDelegate {
     private(set) var session: Session
     private var settingsWindow: SettingsWindow?
+    private let updates = UpdateChecker()
     private var hotkey: Hotkey?
     private let statusLine = NSMenuItem(title: "Ready", action: nil, keyEquivalent: "")
     private var recordingAction: NSMenuItem?
@@ -78,6 +79,11 @@ final class Agent: NSObject, NSApplicationDelegate {
                 if action == #selector(cancel) { cancelAction = entry }
                 if action == #selector(copyLastTranscript) { copyAction = entry }
             }
+            menu.insertItem(.separator(), at: menu.numberOfItems - 1)
+            for entry in [updates.statusItem, updates.checkItem, updates.downloadItem] {
+                menu.insertItem(entry, at: menu.numberOfItems - 1)
+            }
+            menu.insertItem(.separator(), at: menu.numberOfItems - 1)
             item?.menu = menu
             connectSession()
             installSignal(SIGUSR1) { [weak self] in self?.toggle() }
@@ -85,7 +91,8 @@ final class Agent: NSObject, NSApplicationDelegate {
             installSignal(SIGTERM) { [weak self] in self?.quit() }
             installSignal(SIGINT) { [weak self] in self?.quit() }
             update()
-            // Healthy launches stay in the menu bar; no network request or saved readiness flag.
+            updates.configure(automatic: session.configuration.automaticUpdateChecks)
+            // Healthy launches stay in the menu bar.
             if GroqKeychain.storageStatus() != .stored || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized || (session.configuration.paste && !AXIsProcessTrusted()) {
                 editConfig()
                 settingsWindow?.present(showStatus: true)
@@ -166,6 +173,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         catch { newHotkey?.stop(); throw error }
         if let newHotkey { hotkey?.stop(); hotkey = newHotkey }
         session = replacement
+        updates.configure(automatic: config.automaticUpdateChecks)
         AppLog.shared.record("Settings saved")
         connectSession()
         update()

@@ -1,16 +1,17 @@
 # Releasing Sotto
 
-`VERSION` is the macOS marketing version, currently **0.1.1**. Release tags must match it (`v0.1.1`). Update VERSION and RELEASE_NOTES.md before a new release. Never overwrite a published version; the iOS prototype is not part of this workflow.
+`VERSION` is the macOS marketing version. Release tags must match it (`v<version>`). Update VERSION and RELEASE_NOTES.md before a new release. Never overwrite a published version; the iOS prototype is not part of this workflow.
 
 ## Automatic release assets
 
 Publish a GitHub release using the website or:
 
 ```sh
-gh release create v0.1.1 --target main --title "Sotto v0.1.1" --notes-file RELEASE_NOTES.md
+version=$(cat VERSION)
+gh release create "v$version" --target main --title "Sotto v$version" --notes-file RELEASE_NOTES.md
 ```
 
-The **published release** event runs tests and resource checks on Apple Silicon and Intel, then builds a universal app, packages it, re-extracts it, verifies the signature/resources/executable, and attaches `Sotto-0.1.1-macOS-universal.zip` and `SHA256SUMS` to that release. Assets appear after the workflow succeeds. A bare tag push does not publish a release or start attachment; publishing a draft does. Downloads from public release assets do not require a GitHub account.
+The **published release** event runs tests and resource checks on Apple Silicon and Intel, then builds a universal app, packages it, re-extracts it, verifies the signature/resources/executable, and attaches `Sotto-<version>-macOS-universal.zip` and `SHA256SUMS` to that release. Assets appear after the workflow succeeds. A bare tag push does not publish a release or start attachment; publishing a draft does. Downloads from public release assets do not require a GitHub account.
 
 By default these are **ad-hoc-signed personal-use builds**, with no Apple account or signing secrets required. They are not Apple-notarized. State that clearly in release notes; macOS may require first-launch approval and renewed permissions after updates. The workflow fails on invalid mode/version, failed tests, packaging, or upload; it does not overwrite existing assets. Publish a new version to replace a released build.
 
@@ -43,6 +44,6 @@ Every successful CI architecture job also uploads `Sotto-app-ARM64` or `Sotto-ap
 
 ## Validation
 
-CI checks core behavior, diagnostics, resource budgets, release prerequisites, artwork, and packaged apps. Local release preflight tests: `python3 scripts/test-release.py`. Manual microphone, shortcut, paste, and first-install checks remain necessary; packaging checks do not certify macOS permission grants. Notarization remains unverified until real Apple credentials are configured. No Mac App Store submission or in-app updater is included.
+CI checks core behavior, diagnostics, resource budgets, release prerequisites, artwork, and packaged apps. Local release preflight tests: `python3 scripts/test-release.py`. Manual microphone, shortcut, paste, and first-install checks remain necessary; packaging checks do not certify macOS permission grants. Notarization remains unverified until real Apple credentials are configured. Sotto checks for updates and links to release downloads; installation is manual. No Mac App Store submission or automatic installer is included.
 
 Sources: [Developer ID](https://developer.apple.com/developer-id/), [notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [first-launch approval](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).

@@ -23,6 +23,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     private let mode = NSPopUpButton()
     private let shortcut: ShortcutButton
     private let paste = NSButton(checkboxWithTitle: "Paste into the active app", target: nil, action: nil)
+    private let automaticUpdates = NSButton(checkboxWithTitle: "Check automatically · no popups", target: nil, action: nil)
     private let trim = NSButton(checkboxWithTitle: "Trim surrounding whitespace", target: nil, action: nil)
     private let folder = NSTextField(labelWithString: "")
     private let logs = LogsView(frame: .zero)
@@ -56,6 +57,9 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         addChoice(mode, "Hold to record, release to transcribe", "hold")
         addChoice(mode, "Press to start, press again to stop", "toggle")
         select(mode, configuration.hotkeyMode)
+        automaticUpdates.state = configuration.automaticUpdateChecks ? .on : .off
+        automaticUpdates.target = self; automaticUpdates.action = #selector(optionsChanged)
+        automaticUpdates.toolTip = "Checks GitHub at launch and daily. Updates appear in the Sotto menu; downloads are manual."
         paste.state = configuration.paste ? .on : .off
         trim.state = configuration.trimWhitespace ? .on : .off
         paste.target = self; paste.action = #selector(optionsChanged)
@@ -92,7 +96,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
             settingRow("Output", control: paste, caption: "Paste into the active app", matches: { $0.paste == d.paste }, reset: { $0.paste = d.paste }),
             settingRow("Text", control: trim, caption: "Trim surrounding whitespace", matches: { $0.trimWhitespace == d.trimWhitespace }, reset: { $0.trimWhitespace = d.trimWhitespace }),
             settingRow("Recording limit", control: durationRow, caption: "\(Int(d.maxRecordingSeconds)) seconds", matches: { $0.maxRecordingSeconds == d.maxRecordingSeconds }, reset: { $0.maxRecordingSeconds = d.maxRecordingSeconds }),
-            [label("Audio format"), bitrate, NSGridCell.emptyContentView]
+            [label("Audio format"), bitrate, NSGridCell.emptyContentView],
+            settingRow("Updates", control: automaticUpdates, caption: "Automatic · launch and daily", matches: { $0.automaticUpdateChecks == d.automaticUpdateChecks }, reset: { $0.automaticUpdateChecks = d.automaticUpdateChecks })
         ])
         grid.rowSpacing = 8; grid.columnSpacing = 16
         grid.column(at: 0).width = 115
@@ -242,6 +247,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
 
     private func apply(_ config: Configuration) {
         draft = config
+        automaticUpdates.state = config.automaticUpdateChecks ? .on : .off
         select(language, config.language ?? "")
         select(model, config.model); select(mode, config.hotkeyMode)
         paste.state = config.paste ? .on : .off
@@ -264,6 +270,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         config.recordingsDirectory = folder.stringValue
         config.trimWhitespace = trim.state == .on
         config.paste = paste.state == .on
+        config.automaticUpdateChecks = automaticUpdates.state == .on
         config.maxRecordingSeconds = Double(duration.stringValue.trimmingCharacters(in: .whitespaces)) ?? .nan
         return config
     }
@@ -308,7 +315,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         updateButtons()
         guard let window else { return }
         let tab = tabViewItem?.identifier as? String
-        let height: CGFloat = tab == "settings" ? 780 : (tab == "logs" ? 400 : 650)
+        let height: CGFloat = tab == "settings" ? 820 : (tab == "logs" ? 400 : 650)
         var frame = window.frame
         let contentHeight = window.contentRect(forFrameRect: frame).height
         frame.origin.y += contentHeight - height

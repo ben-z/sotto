@@ -11,6 +11,7 @@ public struct Configuration: Codable, Sendable, Equatable {
     public var model = "whisper-large-v3-turbo"
     public var language: String? = "en"
     public var trimWhitespace = true
+    public var automaticUpdateChecks = true
     public var paste = true
     public var hotkeyKeyCode: UInt32 = 1 // S
     public var hotkeyModifiers: UInt32 = 4352 // Control + Command (Carbon masks)
@@ -21,7 +22,7 @@ public struct Configuration: Codable, Sendable, Equatable {
     public init(recordingsDirectory: String) { self.recordingsDirectory = recordingsDirectory }
 
     private enum CodingKeys: String, CodingKey {
-        case recordingsDirectory, model, language, paste, hotkeyKeyCode, hotkeyModifiers, hotkeyMode, maxRecordingSeconds, audioBitRate, trimWhitespace
+        case recordingsDirectory, model, language, paste, hotkeyKeyCode, hotkeyModifiers, hotkeyMode, maxRecordingSeconds, audioBitRate, trimWhitespace, automaticUpdateChecks
     }
 
     public init(from decoder: Decoder) throws {
@@ -35,6 +36,7 @@ public struct Configuration: Codable, Sendable, Equatable {
         hotkeyMode = try values.decode(String.self, forKey: .hotkeyMode)
         maxRecordingSeconds = try values.decode(Double.self, forKey: .maxRecordingSeconds)
         audioBitRate = try values.decode(Int.self, forKey: .audioBitRate)
+        automaticUpdateChecks = try values.decodeIfPresent(Bool.self, forKey: .automaticUpdateChecks) ?? true
         trimWhitespace = try values.decodeIfPresent(Bool.self, forKey: .trimWhitespace) ?? true
     }
 
