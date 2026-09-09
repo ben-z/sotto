@@ -33,6 +33,11 @@ final class Agent: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        fileItem.submenu = fileMenu
+        mainMenu.addItem(fileItem)
         let editMenu = NSMenu(title: "Edit")
         for (title, action, key) in [
             ("Undo", Selector(("undo:")), "z"),
@@ -119,8 +124,7 @@ final class Agent: NSObject, NSApplicationDelegate {
 
     @objc private func about() {
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Sotto",
-            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
-            .credits: NSAttributedString(string: "Quiet dictation. Your Groq key. Your recordings.")])
+            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"])
         NSApp.activate()
     }
 

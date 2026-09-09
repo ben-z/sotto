@@ -9,12 +9,12 @@ public struct SottoError: LocalizedError, Sendable {
 public struct Configuration: Codable, Sendable, Equatable {
     public var recordingsDirectory: String
     public var model = "whisper-large-v3-turbo"
-    public var language: String? = nil
+    public var language: String? = "en"
     public var trimWhitespace = true
-    public var paste = false
+    public var paste = true
     public var hotkeyKeyCode: UInt32 = 1 // S
     public var hotkeyModifiers: UInt32 = 4352 // Control + Command (Carbon masks)
-    public var hotkeyMode = "toggle" // or hold
+    public var hotkeyMode = "hold" // or toggle
     public var maxRecordingSeconds: Double = 1800
     public var audioBitRate = 32000
 

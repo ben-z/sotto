@@ -87,7 +87,7 @@ struct CLI {
                 withExtendedLifetime(agent) { app.run() }
             case "help", "--help", "-h":
                 print("""
-                Sotto — small voice notes, your Groq key.
+                Sotto
                 init [directory]   Create configuration; all audio is retained here
                 config             Print config.json path; edit then restart
                 key set [--stdin]  Store key in macOS Keychain (never in config)

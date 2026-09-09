@@ -4,8 +4,6 @@
 
 <h1 align="center">Sotto</h1>
 
-<p align="center">Lightweight voice dictation. Your audio, your Groq key.</p>
-
 Sotto records your voice, transcribes it with Groq, and copies the text—or pastes it into your active app. It lives in the macOS menu bar and keeps every recording for later reference.
 
 Named after *sotto voce*, “in a quiet voice.” Pronounced **SOH-toh**.
@@ -39,9 +37,9 @@ Your key stays in this device’s Keychain. Recordings go directly to Groq using
 
 ## Use it
 
-The default shortcut is **Control+Command+S** to start or stop. Choose **hold to record** or toggle mode in Settings. The small display-edge light is coral while recording and blue while transcribing; the menu bar also shows **REC**.
+By default, **hold Control+Command+S** to record and release to transcribe, then paste into the active app. English is the default transcription language. Auto-paste requires Accessibility permission. You can choose toggle mode or disable auto-paste in Settings. The small display-edge light is coral while recording and blue while transcribing; the menu bar also shows **REC**.
 
-Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. The menu shows the current recording state and lets you copy the last transcript again. Once permissions and a saved key are in place, launches stay quietly in the menu bar. To change the shortcut, click it in Settings, press your new combination, and choose **Save Changes**. Escape cancels shortcut entry. The change takes effect immediately. Existing saved shortcuts are preserved when upgrading.
+Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. The menu shows the current recording state and lets you copy the last transcript again. Once permissions and a saved key are in place, launches stay quietly in the menu bar. To change the shortcut, click it in Settings, press your new combination, and choose **Save Changes**. Escape cancels shortcut entry. The change takes effect immediately. Editable settings show their defaults and mark overrides. The recording limit is editable in seconds (1–3,600); audio bitrate is shown as a read-only format detail. Reset one setting or use **Reset All to Defaults**, then **Save Changes** to apply. Resets preserve your API key and existing recordings. Under **Configuration file**, **Copy Configuration File Path** copies the JSON path and **Reveal Configuration File** selects it in Finder. Existing saved preferences are preserved when upgrading.
 
 Audio is transcribed after recording stops. There is no always-on microphone, local model, or background screen capture.
 

@@ -118,8 +118,11 @@ import Testing
     let url = directory.appendingPathComponent("support/config.json")
     var config = try Configuration.loadOrCreate(from: url, recordingsDirectory: "/tmp/recordings")
     #expect(config.trimWhitespace && config.recordingsDirectory == "/tmp/recordings")
+    #expect(config.hotkeyMode == "hold" && config.paste && config.language == "en")
     #expect(try Configuration.load(from: url) == config)
     config.language = "ja"
+    config.hotkeyMode = "toggle"
+    config.paste = false
     try config.save(to: url)
     #expect(try Configuration.loadOrCreate(from: url, recordingsDirectory: "/tmp/other") == config)
     let broken = Data("broken JSON".utf8)
