@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "description": "Sotto right-facing paper songbird. Coordinates are top-left origin. Two filled paths; no strokes, fonts, embedded rasters, or dependencies.",
+  "primary": {
+    "body": "M 12 292 L 150 171 C 172 152 180 128 172 113 C 167 104 158 101 145 101 L 194 31 C 217 -2 252 -2 278 20 L 308 14 L 276 40 L 310 41 L 285 62 C 274 76 272 96 268 119 C 254 207 250 225 206 268 L 180 292 Z",
+    "wing": "M 26 63 L 137 107 C 145 143 127 177 98 203 C 110 181 114 170 114 160 C 60 164 30 137 26 63 Z"
+  },
+  "small": {
+    "body": "M 12 292 L 146 173 C 174 150 184 125 172 109 C 167 102 160 99 153 98 L 194 31 C 217 -2 252 -2 278 20 L 306 16 L 277 40 L 307 42 L 283 64 C 273 78 272 96 268 119 C 254 207 250 225 206 268 L 180 292 Z",
+    "wing": "M 26 63 L 130 107 C 135 136 119 168 96 186 L 93 183 C 103 168 107 158 106 151 C 57 156 30 130 26 63 Z"
+  },
+  "palette": {
+    "brand": "#E9957D",
+    "graphite": "#242426",
+    "dark": "#171719",
+    "paper": "#F5F3EF"
+  }
+}
