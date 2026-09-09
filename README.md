@@ -12,7 +12,13 @@ Named after *sotto voce*, “in a quiet voice.” Pronounced **SOH-toh**.
 
 ## Get started
 
-Requires **macOS 14+**, **Xcode with Swift 6**, and a [Groq API key](https://console.groq.com/keys). This is a development build, not a notarized release.
+Requires **macOS 14+** and a [Groq API key](https://console.groq.com/keys). **No Apple Developer account is needed for personal use.**
+
+Download a prebuilt app from the latest successful [CI run on main](https://github.com/ben-z/sotto/actions/workflows/ci.yml?query=branch%3Amain). Under **Artifacts**, choose **Sotto-app-ARM64** for Apple Silicon or **Sotto-app-X64** for Intel. GitHub requires sign-in to download workflow artifacts. Extract the artifact, then the enclosed `Sotto-…zip`, and move `Sotto.app` to Applications. Each download includes a SHA-256 checksum. No Xcode installation is needed to run it.
+
+These personal-use builds are **ad-hoc signed, not notarized by Apple**. macOS may block the first launch: after attempting to open it, use **System Settings → Privacy & Security → Open Anyway** if you trust this download. Updates can require fresh microphone, Accessibility, or Keychain approval. See [Apple's instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
+
+To build from source instead, install **Xcode with Swift 6**:
 
 ```sh
 git clone https://github.com/ben-z/sotto.git
@@ -85,4 +91,4 @@ See [validation notes](VALIDATION.md) for measured results and limitations, and 
 
 ## Releases
 
-Current version: **v0.1.0**. CI tests Apple Silicon and Intel builds. Version tags trigger a signed, notarized universal macOS ZIP release after verification. See [RELEASING.md](RELEASING.md) for the required Apple credentials, local checks, and publishing steps. Publishing is blocked until signing/notarization secrets are configured; development builds remain ad-hoc signed.
+Current version: **v0.1.0**. CI tests Apple Silicon and Intel builds. Version tags trigger a signed, notarized universal macOS ZIP release after verification. See [RELEASING.md](RELEASING.md) for the required Apple credentials, local checks, and publishing steps. Personal-use app downloads are published as CI artifacts without Apple credentials. The separate notarized release workflow remains blocked until signing/notarization secrets are configured.

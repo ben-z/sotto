@@ -2,6 +2,12 @@
 
 `VERSION` is the macOS marketing version, currently **0.1.0**. Tags use `v0.1.0`. The app's build number is 1; increment it for a replacement build and never overwrite a published tag. Update VERSION and RELEASE_NOTES.md before each release. The iOS prototype retains its separate Xcode project version and is not shipped by this workflow.
 
+## Personal-use CI downloads
+
+Every successful architecture job uploads `Sotto-app-ARM64` or `Sotto-app-X64` after tests, resource checks, and artwork validation. Each artifact contains an ad-hoc-signed native app ZIP and its SHA-256 checksum. Packaging re-extracts the ZIP and verifies the app signature, required resources, and CLI launch before upload. These downloads need no Apple Developer account or CI signing secrets; GitHub sign-in is needed to download artifacts.
+
+These are explicitly unnotarized development builds. They do not use the signed release workflow below, do not create version tags or GitHub Releases, and are subject to Actions artifact retention. macOS may require an explicit first-launch approval and renewed permissions after updates.
+
 ## Signing
 
 Local builds use free ad-hoc signing. Public macOS distribution uses a **Developer ID Application** certificate from an Apple Developer Program membership and Apple's notarization service. Apple lists membership at US$99/year (or local currency). This workflow does not publish an unsigned fallback.

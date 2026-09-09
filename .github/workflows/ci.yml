@@ -53,3 +53,12 @@ jobs:
           if-no-files-found: error
       - name: Verify artwork
         run: python3 design/icon/source/rebuild.py --check
+      - name: Package personal-use app download
+        run: scripts/package-ci.sh
+      - name: Upload personal-use app
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: Sotto-app-${{ runner.arch }}
+          path: .build/ci-download/*
+          if-no-files-found: error
+          compression-level: 0

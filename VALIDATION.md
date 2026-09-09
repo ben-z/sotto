@@ -86,3 +86,9 @@ The running app bundle was not replaced during this review, to avoid another dev
 - AppLog appends on events to two 256 KiB files with owner-only permissions; no polling or retained history buffer. Known credential patterns are redacted, entries are single-line and truncated, and write failures surface in stderr/system logging and the Logs view. Recordings/transcripts are not used as log messages.
 - Filesystem regression checks passed for persistence across readers, rotation/size, credential redaction, permissions, and explicit write-failure reporting. Core tests and release build passed. Added the log checks to CI.
 - Computer use verified the Logs layout, persisted launch events, a real blocked-recording error, Copy Logs, Show in Finder selecting sotto.log, and a failed settings-save sheet. The test checkbox change was reverted without saving. Live transcription was not repeated because this ad-hoc rebuild requires fresh grants; neither configuration nor saved key was changed.
+
+## Personal-use CI app downloads — September 8, 2026
+
+- CI now packages and uploads ad-hoc-signed native app ZIPs and SHA-256 checksums after each architecture job's checks pass. The signed/notarized tag-release workflow remains separate and still requires its credentials.
+- The packaging script verifies ad-hoc signing and the expected architecture, then extracts the ZIP and reruns packaged-app checks, including CLI launch. Local arm64 packaging and extraction verification passed.
+- README explains artifact selection, GitHub sign-in, extraction, no Apple Developer account/Xcode requirement for running prebuilt apps, first-launch approval, and development permission churn.
