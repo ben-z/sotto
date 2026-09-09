@@ -19,7 +19,10 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         didSet {
             UserDefaults.standard.set(locationEnabled, forKey: "notes.location")
             if locationEnabled { locationManager.requestWhenInUseAuthorization() }
-            else { locationNoteID = nil; locationMessage = nil }
+            else {
+                for request in locationRequests.values { request.manager.delegate = nil; request.manager.stopUpdatingLocation() }
+                locationRequests.removeAll(); locationMessage = nil
+            }
         }
     }
     @Published var locationMessage: String?
@@ -29,7 +32,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         return manager
     }()
-    private var locationNoteID: String?
+    private var locationRequests: [ObjectIdentifier: (manager: CLLocationManager, noteID: String)] = [:]
     private let recorder = Recorder()
     private let log = Logger(subsystem: "dev.sotto.notes", category: "audio")
     private var player: AVAudioPlayer?
@@ -50,8 +53,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         refreshKey()
         NotificationCenter.default.addObserver(self, selector: #selector(audioInterrupted(_:)), name: AVAudioSession.interruptionNotification, object: nil)
         recorder.onUnexpectedStop = { [weak self] message in
-            self?.finish()
-            if let message { self?.error = message }
+            self?.finish(recordingError: message)
         }
         network.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
@@ -79,7 +81,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     @objc nonisolated private func audioInterrupted(_ notification: Notification) {
         guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
-        Task { @MainActor [weak self] in self?.finish() }
+        Task { @MainActor [weak self] in self?.finish(recordingError: nil) }
     }
 
     func refreshKey() {
@@ -91,7 +93,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     }
 
     func toggleRecording() async {
-        if recording != nil { finish(); return }
+        if recording != nil { finish(recordingError: nil); return }
         guard !preparing, let library else { return }
         preparing = true; error = nil; stopPlayback()
         defer { preparing = false }
@@ -113,21 +115,20 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
             captureLocation(for: note)
             log.notice("Recording \(note.id, privacy: .public)")
             deadline = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(1800)); self?.finish() } catch { }
+                do { try await Task.sleep(for: .seconds(1800)); self?.finish(recordingError: nil) } catch { }
             }
         } catch { self.error = error.localizedDescription }
     }
 
-    func finish() {
+    func finish(recordingError: String?) {
         guard let note = recording, let library else { return }
         deadline?.cancel(); deadline = nil; error = nil
+        defer { recording = nil }
         do {
-            let duration = try recorder.stop()
-            recording = nil
-            try library.queue(note, duration: duration)
+            try library.finishRecording(note, recordingError: recordingError, stop: { try recorder.stop() })
             log.notice("Saved audio \(note.id, privacy: .public)")
             resume()
-        } catch { recording = nil; self.error = error.localizedDescription }
+        } catch { self.error = error.localizedDescription }
     }
 
     func resume() {
@@ -177,49 +178,58 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     private func captureLocation(for note: RecordingRecord) {
         guard locationEnabled else { return }
-        locationNoteID = note.id
-        switch locationManager.authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse: locationManager.requestLocation()
-        case .notDetermined: locationManager.requestWhenInUseAuthorization()
-        default: saveLocation(nil, message: "Location access is disabled in iPhone Settings.")
-        }
+        let manager = CLLocationManager()
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        locationRequests[ObjectIdentifier(manager)] = (manager, note.id)
+        manager.delegate = self
     }
 
-    private func saveLocation(_ location: RecordingLocation?, message: String?) {
+    private func saveLocation(_ location: RecordingLocation?, message: String?, requestID: ObjectIdentifier) {
+        guard let request = locationRequests.removeValue(forKey: requestID) else { return }
+        request.manager.delegate = nil
         locationMessage = message
-        defer { locationNoteID = nil }
-        guard let id = locationNoteID, let library, var note = library.notes.first(where: { $0.id == id }) else { return }
+        guard let library, var note = library.notes.first(where: { $0.id == request.noteID }) else { return }
         note.location = location; note.locationStatus = message
         do { try library.save(note) } catch { self.error = "Cannot save location: \(error.localizedDescription)" }
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let requestID = ObjectIdentifier(manager)
         Task { @MainActor [weak self] in
             guard let self, self.locationEnabled else { return }
+            if let request = self.locationRequests[requestID] {
+                switch request.manager.authorizationStatus {
+                case .authorizedAlways, .authorizedWhenInUse: request.manager.requestLocation()
+                case .notDetermined: request.manager.requestWhenInUseAuthorization()
+                default: self.saveLocation(nil, message: "Location access is disabled in iPhone Settings.", requestID: requestID)
+                }
+                return
+            }
             switch self.locationManager.authorizationStatus {
             case .authorizedAlways, .authorizedWhenInUse:
                 self.locationMessage = nil
-                if self.locationNoteID != nil { self.locationManager.requestLocation() }
-            case .denied, .restricted: self.saveLocation(nil, message: "Location access is disabled in iPhone Settings.")
+            case .denied, .restricted: self.locationMessage = "Location access is disabled in iPhone Settings."
             default: break
             }
         }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        let requestID = ObjectIdentifier(manager)
         let location = locations.last
         Task { @MainActor [weak self] in
             guard let self, self.locationEnabled else { return }
             guard let location, location.horizontalAccuracy >= 0, abs(location.timestamp.timeIntervalSinceNow) < 60 else {
-                self.saveLocation(nil, message: "Location was unavailable when this recording started."); return
+                self.saveLocation(nil, message: "Location was unavailable when this recording started.", requestID: requestID); return
             }
-            self.saveLocation(RecordingLocation(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude, accuracyMeters: location.horizontalAccuracy), message: nil)
+            self.saveLocation(RecordingLocation(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude, accuracyMeters: location.horizontalAccuracy), message: nil, requestID: requestID)
         }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        let requestID = ObjectIdentifier(manager)
         Task { @MainActor [weak self] in
-            self?.saveLocation(nil, message: "Location unavailable: \(error.localizedDescription)")
+            self?.saveLocation(nil, message: "Location unavailable: \(error.localizedDescription)", requestID: requestID)
         }
     }
 
@@ -251,4 +261,3 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         }
     }
 }
-

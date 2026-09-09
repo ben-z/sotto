@@ -228,3 +228,59 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(restored.location?.latitude == 37.3)
     #expect(restored.location?.accuracyMeters == 100)
 }
+
+@MainActor @Test func encoderFailureRetainsAudioWithoutUploading() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let note = try library.create(model: "fixture", language: "en")
+    try Data([1, 2, 3]).write(to: library.archive.audioURL(note))
+    var stopped = false
+    #expect(throws: (any Error).self) {
+        try library.finishRecording(note, recordingError: "Encoder failed") { stopped = true; return 2 }
+    }
+    #expect(stopped)
+    #expect(library.notes[0].status == "interrupted")
+    #expect(library.notes[0].error == "Encoder failed")
+    #expect(try NoteLibrary(directory: directory).notes[0].status == "interrupted")
+    #expect(try Data(contentsOf: library.archive.audioURL(note)) == Data([1, 2, 3]))
+    await library.process(key: { "fixture" }) { _, _, _ in
+        Issue.record("An encoder failure must not trigger an upload")
+        throw SottoError("Unexpected upload")
+    }
+    try library.delete([note.id])
+    #expect(library.notes.isEmpty)
+}
+
+@MainActor @Test func stopFailureCanBeRetriedWithoutRelaunch() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let note = try library.create(model: "fixture", language: "en")
+    try Data([1, 2, 3]).write(to: library.archive.audioURL(note))
+    #expect(throws: (any Error).self) {
+        try library.finishRecording(note, recordingError: nil) { throw SottoError("Audio session could not deactivate") }
+    }
+    #expect(library.notes[0].status == "interrupted")
+    try library.transcribe([note.id], model: "fixture", language: "en")
+    #expect(library.notes[0].status == "queued")
+}
+
+@MainActor @Test func finalizationWriteFailureLeavesStoppedNoteEditable() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let note = try library.create(model: "fixture", language: "en")
+    try Data([1, 2, 3]).write(to: library.archive.audioURL(note))
+    let metadata = directory.appendingPathComponent("\(note.id).json")
+    try FileManager.default.removeItem(at: metadata)
+    try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: false)
+    do {
+        try library.finishRecording(note, recordingError: nil) { 2 }
+        Issue.record("The failed metadata write must be reported")
+    } catch { #expect(error.localizedDescription.contains("Could not save interrupted status")) }
+    #expect(library.notes[0].status == "interrupted")
+    try FileManager.default.removeItem(at: metadata)
+    try library.transcribe([note.id], model: "fixture", language: "en")
+    #expect(try NoteLibrary(directory: directory).notes[0].status == "queued")
+}

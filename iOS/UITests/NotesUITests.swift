@@ -52,6 +52,32 @@ final class NotesUITests: XCTestCase {
         app.buttons["Done"].tap()
     }
 
+    func testBackToBackRecordingsKeepTheirLocations() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        enableLocation(in: app)
+        app.buttons["Done"].tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved"))
+        var noteIDs: [String] = []
+        for _ in 0..<2 {
+            let count = saved.count
+            app.buttons["record-note"].tap()
+            XCTAssertTrue(app.buttons["Stop recording"].waitForExistence(timeout: 15))
+            Thread.sleep(forTimeInterval: 1)
+            app.buttons["Stop recording"].tap()
+            let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in saved.count == count + 1 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [added], timeout: 10), .completed)
+            noteIDs.append(saved.firstMatch.identifier)
+        }
+        XCTAssertEqual(Set(noteIDs).count, 2)
+        for id in noteIDs {
+            app.buttons[id].tap()
+            XCTAssertTrue(app.buttons["recording-location"].waitForExistence(timeout: 10))
+            app.navigationBars.buttons["Notes"].tap()
+        }
+    }
+
     func testBatchDeletionAndCancel() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()

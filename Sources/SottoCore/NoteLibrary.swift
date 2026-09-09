@@ -64,6 +64,29 @@ public final class NoteLibrary: ObservableObject {
         try save(note)
     }
 
+    public func finishRecording(_ note: RecordingRecord, recordingError: String?, stop: () throws -> Double) throws {
+        do {
+            let duration = try stop()
+            if let recordingError { throw SottoError(recordingError) }
+            try queue(note, duration: duration)
+        } catch {
+            let message = error.localizedDescription
+            do { try interrupt(note.id, message: message) }
+            catch { throw SottoError("\(message) · Could not save interrupted status: \(error.localizedDescription)") }
+            throw error
+        }
+    }
+
+    private func interrupt(_ id: String, message: String) throws {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else {
+            throw SottoError("The interrupted recording is no longer available.")
+        }
+        // A stopped recorder must remain editable even if storage rejects the status write.
+        notes[index].status = "interrupted"
+        notes[index].error = message
+        try archive.save(notes[index])
+    }
+
     public func transcribe(_ ids: Set<String>, model: String, language: String?) throws {
         let selected = try editableNotes(ids)
         // Validate the whole selection before changing its queue state.
