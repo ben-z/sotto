@@ -12,8 +12,8 @@ public struct Configuration: Codable, Sendable, Equatable {
     public var language: String? = nil
     public var trimWhitespace = true
     public var paste = false
-    public var hotkeyKeyCode: UInt32 = 49 // Space
-    public var hotkeyModifiers: UInt32 = 6144 // Control + Option (Carbon masks)
+    public var hotkeyKeyCode: UInt32 = 1 // S
+    public var hotkeyModifiers: UInt32 = 4352 // Control + Command (Carbon masks)
     public var hotkeyMode = "toggle" // or hold
     public var maxRecordingSeconds: Double = 1800
     public var audioBitRate = 32000

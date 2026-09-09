@@ -99,7 +99,7 @@ struct CLI {
                 quit               Stop the agent safely
                 transcribe FILE    Transcribe/retry a file; retain audio and diagnostics
                 run                Run the background agent (prefer scripts/launch.sh)
-                Default hotkey: Control+Option+Space; menu icon shows state.
+                Default hotkey: Control+Command+S; menu icon shows state.
                 """)
             default: throw SottoError("Unknown command. Run `sotto help`.")
             }

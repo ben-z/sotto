@@ -3,6 +3,10 @@ set -euo pipefail
 cd "${0:A:h:h}"
 version=$(cat VERSION)
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { print -u2 'VERSION must be major.minor.patch'; exit 1; }
+revision=$(git rev-parse --short=12 HEAD)
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+    revision+="-dirty"
+fi
 build_args=(-c release)
 if [[ "${SOTTO_UNIVERSAL:-0}" == 1 ]]; then
     build_args+=(--arch arm64 --arch x86_64)
@@ -34,6 +38,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :SottoGitRevision string $revision" "$app/Contents/Info.plist"
 identity="${SOTTO_SIGNING_IDENTITY:--}"
 sign_args=(--force --sign "$identity" --identifier dev.sotto.app)
 if [[ "$identity" != - ]]; then

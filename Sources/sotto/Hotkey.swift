@@ -19,6 +19,11 @@ final class Hotkey {
         return modifiers + (keys[configuration.hotkeyKeyCode] ?? "Key \(configuration.hotkeyKeyCode)")
     }
 
+    func stop() {
+        if let hotkey { UnregisterEventHotKey(hotkey) }; hotkey = nil
+        if let handler { RemoveEventHandler(handler) }; handler = nil
+    }
+
     init(keyCode: UInt32, modifiers: UInt32, action: @escaping (Bool) -> Void) throws {
         self.action = action
         var events = [

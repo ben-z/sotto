@@ -2,47 +2,95 @@ import AppKit
 
 @MainActor
 final class LogsView: NSView {
-    private let text = NSTextView()
-    private let status = NSTextField(labelWithString: "Session events and errors · up to 512 KiB retained")
+    private let exportFeedback = NSTextField(labelWithString: "")
+    private let copyFeedback = NSTextField(labelWithString: "")
+    private let export = NSButton(title: "Export Logs…", target: nil, action: nil)
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        text.isEditable = false
-        text.isRichText = false
-        text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        text.textContainerInset = NSSize(width: 8, height: 8)
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        scroll.documentView = text
-        text.autoresizingMask = [.width]
-        text.textContainer?.widthTracksTextView = true
-        let refresh = NSButton(title: "Refresh", target: self, action: #selector(reload))
-        let copy = NSButton(title: "Copy Logs", target: self, action: #selector(copyLogs))
-        let reveal = NSButton(title: "Show in Finder", target: self, action: #selector(revealLogs))
-        let buttons = NSStackView(views: [refresh, copy, reveal])
-        buttons.orientation = .horizontal; buttons.spacing = 8
-        status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor
-        for view in [status, scroll, buttons] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
+        export.target = self; export.action = #selector(exportLogs)
+        let command = NSButton(title: "Copy Terminal Command", target: self, action: #selector(copyCommand))
+        let title = NSTextField(labelWithString: "Diagnostics")
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        let purpose = NSTextField(wrappingLabelWithString: "Save recent logs to help investigate a problem.")
+        let actions = NSGridView(views: [[export, exportFeedback], [command, copyFeedback]])
+        actions.rowSpacing = 12; actions.columnSpacing = 12
+        actions.column(at: 0).width = 200
+        actions.column(at: 0).xPlacement = .leading
+        actions.column(at: 1).xPlacement = .fill
+        actions.yPlacement = .center
+        for feedback in [exportFeedback, copyFeedback] { feedback.textColor = .secondaryLabelColor }
+        let terminalHelp = NSTextField(wrappingLabelWithString: "The terminal command displays the same logs without saving a file.")
+        terminalHelp.textColor = .secondaryLabelColor
+        let separator = NSBox(); separator.boxType = .separator
+        let scope = NSTextField(wrappingLabelWithString: "Includes the last 24 hours of available Sotto logs. Recordings and transcripts are not included. macOS controls log retention.")
+        scope.font = .systemFont(ofSize: 11)
+        scope.textColor = .secondaryLabelColor
+        let build = NSTextField(labelWithString: BuildInfo.diagnostics)
+        build.font = .systemFont(ofSize: 11)
+        build.textColor = .secondaryLabelColor
+        build.isSelectable = true
+        let stack = NSStackView(views: [title, purpose, actions, terminalHelp, separator, scope, build])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 16
+        stack.setCustomSpacing(6, after: title)
+        stack.setCustomSpacing(8, after: scope)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
         NSLayoutConstraint.activate([
-            status.topAnchor.constraint(equalTo: topAnchor, constant: 16), status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            status.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            scroll.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 8), scroll.leadingAnchor.constraint(equalTo: status.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: status.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -10),
-            buttons.leadingAnchor.constraint(equalTo: status.leadingAnchor), buttons.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16)
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -16)
         ])
+        for view in [purpose, actions, terminalHelp, separator, scope] {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
     }
+
     required init?(coder: NSCoder) { fatalError("LogsView is created programmatically") }
 
-    @objc func reload() {
-        status.stringValue = "Session events and errors · up to 512 KiB retained"
-        do { text.string = try AppLog.shared.read() }
-        catch { text.string = "Could not read logs: \(error.localizedDescription)" }
-        text.scrollToEndOfDocument(nil)
+    func clearCopyFeedback() { copyFeedback.stringValue = "" }
+
+    @objc private func exportLogs() {
+        guard let window else { return }
+        let panel = NSSavePanel()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        panel.nameFieldStringValue = "Sotto-diagnostics-\(timestamp).txt"
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.export.isEnabled = false
+            self.exportFeedback.stringValue = "Exporting…"
+            Task {
+                defer { self.export.isEnabled = true }
+                do {
+                    try await DiagnosticExport.save(to: url)
+                    self.exportFeedback.stringValue = "Saved"
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } catch {
+                    self.exportFeedback.stringValue = "Export failed"
+                    self.showError("Could not export logs", detail: error.localizedDescription)
+                }
+            }
+        }
     }
-    @objc private func copyLogs() {
+
+    @objc private func copyCommand() {
         NSPasteboard.general.clearContents()
-        status.stringValue = NSPasteboard.general.setString(text.string, forType: .string) ? "Logs copied" : "Could not copy logs."
+        if NSPasteboard.general.setString(DiagnosticExport.command, forType: .string) {
+            copyFeedback.stringValue = "Command copied"
+        } else {
+            copyFeedback.stringValue = "Copy failed"
+            showError("Could not copy command", detail: "The clipboard could not be updated. Try again.")
+        }
     }
-    @objc private func revealLogs() { NSWorkspace.shared.activateFileViewerSelecting([AppLog.shared.file]) }
+
+    private func showError(_ title: String, detail: String) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.beginSheetModal(for: window)
+    }
 }

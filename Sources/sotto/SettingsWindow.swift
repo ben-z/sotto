@@ -14,12 +14,14 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     private let language = NSPopUpButton()
     private let model = NSPopUpButton()
     private let mode = NSPopUpButton()
+    private let shortcut: ShortcutButton
     private let paste = NSButton(checkboxWithTitle: "Paste into the active app", target: nil, action: nil)
     private let trim = NSButton(checkboxWithTitle: "Trim surrounding whitespace", target: nil, action: nil)
     private let folder = NSTextField(labelWithString: "")
     private let logs = LogsView(frame: .zero)
 
     init(configuration: Configuration, configurationURL: URL, onSave: @escaping (Configuration) throws -> Void, onClose: @escaping () -> Void) {
+        shortcut = ShortcutButton(configuration: configuration)
         original = configuration; saveConfiguration = onSave; didClose = onClose
         self.configurationURL = configurationURL
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 700),
@@ -29,6 +31,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         window.hidesOnDeactivate = false
         super.init(window: window)
         window.delegate = self
+        shortcut.changed = { [weak self] in self?.updateButtons() }
 
         addChoice(language, "Automatic detection", "")
         let locale = Locale.current
@@ -59,9 +62,18 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         let folderRow = NSStackView(views: [folder, choose])
         folderRow.orientation = .horizontal; folderRow.spacing = 8
         choose.setContentHuggingPriority(.required, for: .horizontal)
+        let resetShortcut = NSButton(title: "Reset", target: self, action: #selector(resetShortcut))
+        resetShortcut.toolTip = "Reset shortcut to Control–Command–S"
+        resetShortcut.setContentHuggingPriority(.required, for: .horizontal)
+        let shortcutRow = NSStackView(views: [shortcut, resetShortcut])
+        shortcutRow.orientation = .horizontal; shortcutRow.spacing = 8
+        let build = label(BuildInfo.version)
+        build.isSelectable = true
+        build.textColor = .secondaryLabelColor
         let grid = NSGridView(views: [
+            [label("Version"), build],
             [label("Language"), language], [label("Model"), model],
-            [label("Shortcut"), label(Hotkey.displayName(configuration))],
+            [label("Shortcut"), shortcutRow],
             [label("Recording mode"), mode], [label("Recordings"), folderRow],
             [label("Output"), paste],
             [label("Text"), trim],
@@ -74,7 +86,6 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         let description = NSTextField(wrappingLabelWithString: "Changes apply when you save. All recordings are kept; choosing a new folder leaves existing files in place.")
         description.textColor = .secondaryLabelColor
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
-        cancel.keyEquivalent = "\u{1b}"
         saveButton.target = self; saveButton.action = #selector(save)
         saveButton.keyEquivalent = "\r"
         let copyPath = NSButton(title: "Copy Config Path", target: self, action: #selector(copyConfigPath(_:)))
@@ -130,6 +141,12 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     }
     private func value(_ control: NSPopUpButton) -> String { control.selectedItem!.representedObject as! String }
 
+    func captureCurrentShortcut() -> Bool {
+        guard window?.isKeyWindow == true, shortcut.recording else { return false }
+        shortcut.capture(original)
+        return true
+    }
+
     func showIssue(_ visible: Bool) { diagnostics.showIssue(visible) }
 
     func present(showStatus: Bool = false, error: String? = nil) {
@@ -164,9 +181,15 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         else { showError("Could not copy the configuration path.") }
     }
     @objc private func revealConfig() { NSWorkspace.shared.activateFileViewerSelecting([configurationURL]) }
+    @objc private func resetShortcut() {
+        shortcut.capture(Configuration(recordingsDirectory: original.recordingsDirectory))
+    }
+    override func cancelOperation(_ sender: Any?) { /* Escape must not discard Settings edits. */ }
     @objc private func cancel() { close() }
     private var editedConfiguration: Configuration {
         var config = original
+        config.hotkeyKeyCode = shortcut.configuration.hotkeyKeyCode
+        config.hotkeyModifiers = shortcut.configuration.hotkeyModifiers
         config.language = value(language).isEmpty ? nil : value(language)
         config.model = value(model); config.hotkeyMode = value(mode)
         config.recordingsDirectory = folder.stringValue
@@ -197,10 +220,11 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     }
 
     func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        logs.clearCopyFeedback()
         updateButtons()
-        if tabViewItem?.identifier as? String == "logs" { logs.reload() }
         guard let window else { return }
-        let height: CGFloat = tabViewItem?.identifier as? String == "settings" ? 410 : 650
+        let tab = tabViewItem?.identifier as? String
+        let height: CGFloat = tab == "settings" ? 410 : (tab == "logs" ? 400 : 650)
         var frame = window.frame
         let contentHeight = window.contentRect(forFrameRect: frame).height
         frame.origin.y += contentHeight - height
@@ -210,7 +234,6 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
 
     func windowDidBecomeKey(_ notification: Notification) {
         diagnostics.refresh()
-        if tabs.selectedTabViewItem?.identifier as? String == "logs" { logs.reload() }
     }
     func windowWillClose(_ notification: Notification) {
         diagnostics.cancelCheck()

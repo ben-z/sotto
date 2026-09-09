@@ -2,6 +2,7 @@
 """Offline checks for an actual packaged app; never launches it or reads Keychain."""
 import argparse
 import plistlib
+import re
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,7 @@ root = Path(__file__).resolve().parent.parent
 with (args.app / 'Contents/Info.plist').open('rb') as source:
     info = plistlib.load(source)
 assert info['CFBundleShortVersionString'] == (root / 'VERSION').read_text().strip()
+assert re.fullmatch(r'[0-9a-f]{12,40}(-dirty)?', info['SottoGitRevision'])
 assert info['CFBundleIdentifier'] == 'dev.sotto.app'
 assert info['NSMicrophoneUsageDescription']
 resources = args.app / 'Contents/Resources'

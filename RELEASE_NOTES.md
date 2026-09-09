@@ -1,10 +1,12 @@
-Sotto v0.1.0 is the first macOS release of the lightweight Groq dictation app.
+Sotto v0.1.1 improves shortcut configuration, keyboard editing, and diagnostics.
 
-- Global shortcut with press-to-toggle and press-and-hold recording modes.
-- Native settings, secure Keychain API-key management, and permission status.
-- Configurable language and Whisper model, optional auto-paste, and whitespace trimming.
-- Retained compressed audio, transcripts, and raw response diagnostics.
-- Centered menu-bar bird and unobtrusive recording indicator.
+- Configure your shortcut directly in Settings, with a reset to Control–Command–S. Existing saved shortcuts are preserved.
+- Command–V now works in the Groq API-key field; standard text-editing shortcuts are available throughout Settings.
+- Escape cancels shortcut capture without closing Settings or discarding edits.
+- Version and Git revision appear in Settings and diagnostic exports.
+- Native macOS logging replaces custom log files. Export recent Sotto logs to a timestamped text file, or copy a Terminal command to inspect them. Recordings and transcripts are not bundled into exports.
+- A simpler diagnostics page keeps instructions visible and feedback beside each action.
+- Accessibility guidance explains how to repair stale permission entries after development builds.
 
 Requires macOS 14 or later and your own Groq API key. The universal app supports Apple Silicon and Intel Macs. Microphone permission is required; Accessibility is needed only for auto-paste. Recordings are sent directly to Groq and retained locally.
 

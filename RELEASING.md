@@ -1,16 +1,16 @@
 # Releasing Sotto
 
-`VERSION` is the macOS marketing version, currently **0.1.0**. Release tags must match it (`v0.1.0`). Update VERSION and RELEASE_NOTES.md before a new release. Never overwrite a published version; the iOS prototype is not part of this workflow.
+`VERSION` is the macOS marketing version, currently **0.1.1**. Release tags must match it (`v0.1.1`). Update VERSION and RELEASE_NOTES.md before a new release. Never overwrite a published version; the iOS prototype is not part of this workflow.
 
 ## Automatic release assets
 
 Publish a GitHub release using the website or:
 
 ```sh
-gh release create v0.1.0 --target main --title "Sotto v0.1.0" --notes-file RELEASE_NOTES.md
+gh release create v0.1.1 --target main --title "Sotto v0.1.1" --notes-file RELEASE_NOTES.md
 ```
 
-The **published release** event runs tests and resource checks on Apple Silicon and Intel, then builds a universal app, packages it, re-extracts it, verifies the signature/resources/executable, and attaches `Sotto-0.1.0-macOS-universal.zip` and `SHA256SUMS` to that release. Assets appear after the workflow succeeds. A bare tag push does not publish a release or start attachment; publishing a draft does. Downloads from public release assets do not require a GitHub account.
+The **published release** event runs tests and resource checks on Apple Silicon and Intel, then builds a universal app, packages it, re-extracts it, verifies the signature/resources/executable, and attaches `Sotto-0.1.1-macOS-universal.zip` and `SHA256SUMS` to that release. Assets appear after the workflow succeeds. A bare tag push does not publish a release or start attachment; publishing a draft does. Downloads from public release assets do not require a GitHub account.
 
 By default these are **ad-hoc-signed personal-use builds**, with no Apple account or signing secrets required. They are not Apple-notarized. State that clearly in release notes; macOS may require first-launch approval and renewed permissions after updates. The workflow fails on invalid mode/version, failed tests, packaging, or upload; it does not overwrite existing assets. Publish a new version to replace a released build.
 

@@ -97,3 +97,8 @@ The running app bundle was not replaced during this review, to avoid another dev
 
 - Publishing a GitHub release now triggers the full two-architecture checks and attaches a universal app ZIP plus SHA256SUMS. Default mode is explicitly ad-hoc; `SOTTO_NOTARIZE=true` explicitly selects the credential-required notarized path, with no fallback.
 - Six release preflight checks passed. Local `scripts/release.sh --adhoc` built both architectures without Apple credentials, then extracted and verified the packaged app. Updated README, release notes, and release instructions to distinguish personal-use downloads from notarized distribution.
+
+
+## v0.1.1 release preparation
+
+Computer-use checks covered shortcut capture/reset, Escape behavior, saving a changed shortcut, Command–V and Command–A with unsaved dummy API-key text, the build identity display, diagnostic export, and copy feedback clearing on tab changes. Timestamped exports were inspected for native startup events and exclusion of the test process. User configuration and clipboard were restored after tests; stored credentials and recordings were retained. Current macOS permission grants may need renewal after development rebuilds. CI runs core, diagnostic, release, artwork, packaging, and resource checks on both Mac architectures before attaching release assets.

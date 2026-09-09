@@ -39,9 +39,9 @@ Your key stays in this device’s Keychain. Recordings go directly to Groq using
 
 ## Use it
 
-The default shortcut is **Control+Option+Space** to start or stop. Choose **hold to record** or toggle mode in Settings. The small display-edge light is coral while recording and blue while transcribing; the menu bar also shows **REC**.
+The default shortcut is **Control+Command+S** to start or stop. Choose **hold to record** or toggle mode in Settings. The small display-edge light is coral while recording and blue while transcribing; the menu bar also shows **REC**.
 
-Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. The menu shows the current recording state and lets you copy the last transcript again. Once permissions and a saved key are in place, launches stay quietly in the menu bar. Advanced shortcut settings are available through **Copy Config Path**.
+Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. The menu shows the current recording state and lets you copy the last transcript again. Once permissions and a saved key are in place, launches stay quietly in the menu bar. To change the shortcut, click it in Settings, press your new combination, and choose **Save Changes**. Escape cancels shortcut entry. The change takes effect immediately. Existing saved shortcuts are preserved when upgrading.
 
 Audio is transcribed after recording stops. There is no always-on microphone, local model, or background screen capture.
 
@@ -61,7 +61,7 @@ Audio uses compact AAC, approximately **14.4 MB per hour**. Nothing is automatic
 
 ## Diagnostics
 
-Open **Settings → Logs** for timestamped session events and errors, with Refresh, Copy Logs, and Show in Finder. Logs persist at `~/Library/Application Support/Sotto/Logs/` in two files capped at 256 KiB each. They are written only on events, with no background polling. Audio, transcripts, and raw Groq responses remain in your recording folder.
+Open **Settings → Logs → Export Logs…** to save a shareable text file of Sotto’s system logs, including build details. Suggested filenames include a UTC timestamp with milliseconds so successive exports stay distinct. **Copy Terminal Command** copies a filtered query that displays logs in Terminal without saving a file. Sotto uses native macOS Unified Logging (subsystem `dev.sotto.app`); macOS controls retention, so a complete 24-hour history is not guaranteed. Export runs only when requested and streams output to a temporary file; there is no background reader or app-managed log rotation. Audio, transcripts, and raw Groq responses stay in your recording folder and are not bundled into the export.
 
 ## CLI
 
@@ -93,4 +93,4 @@ See [validation notes](VALIDATION.md) for measured results and limitations, and 
 
 ## Releases
 
-Current version: **v0.1.0**. Publishing a new GitHub release automatically runs checks, builds a universal app, and attaches its ZIP and checksum. Personal-use releases need no Apple credentials. Developer ID signing and notarization can be enabled explicitly later; see [RELEASING.md](RELEASING.md).
+Current version: **v0.1.1**. Publishing a new GitHub release automatically runs checks, builds a universal app, and attaches its ZIP and checksum. Personal-use releases need no Apple credentials. Developer ID signing and notarization can be enabled explicitly later; see [RELEASING.md](RELEASING.md).

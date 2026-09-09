@@ -25,13 +25,36 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppLog.shared.record("Sotto started · version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development")")
+        let mainMenu = NSMenu()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About Sotto", action: #selector(about), keyEquivalent: "").target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit Sotto", action: #selector(quit), keyEquivalent: "q").target = self
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+        let editMenu = NSMenu(title: "Edit")
+        for (title, action, key) in [
+            ("Undo", Selector(("undo:")), "z"),
+            ("Cut", #selector(NSText.cut(_:)), "x"),
+            ("Copy", #selector(NSText.copy(_:)), "c"),
+            ("Paste", #selector(NSText.paste(_:)), "v"),
+            ("Select All", #selector(NSText.selectAll(_:)), "a")
+        ] {
+            editMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
+        }
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        NSApp.mainMenu = mainMenu
+        AppLog.shared.record("Started · \(BuildInfo.diagnostics)")
         do {
             try FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
             lockFD = Darwin.open(Paths.support.appendingPathComponent("agent.lock").path, O_CREAT | O_RDWR, 0o600)
             guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw SottoError("Another Sotto agent is already running, or the lock file is unavailable.") }
             hotkey = try Hotkey(keyCode: session.configuration.hotkeyKeyCode, modifiers: session.configuration.hotkeyModifiers) { [weak self] pressed in
                 guard let self else { return }
+                if pressed, self.settingsWindow?.captureCurrentShortcut() == true { return }
                 if pressed { self.toggle() }
                 else if self.session.configuration.hotkeyMode == "hold" { Task { await self.session.finish() } }
             }
@@ -128,7 +151,16 @@ final class Agent: NSObject, NSApplicationDelegate {
             guard AXIsProcessTrusted() else { throw SottoError("Grant Sotto Accessibility access, then click Save again.") }
         }
         let replacement = try Session(configuration: config)
-        try config.save(to: Paths.config)
+        let shortcutChanged = config.hotkeyKeyCode != session.configuration.hotkeyKeyCode
+            || config.hotkeyModifiers != session.configuration.hotkeyModifiers
+        let newHotkey: Hotkey?
+        if shortcutChanged {
+            guard let action = hotkey?.action else { throw SottoError("Shortcut handler is unavailable. Restart Sotto.") }
+            newHotkey = try Hotkey(keyCode: config.hotkeyKeyCode, modifiers: config.hotkeyModifiers, action: action)
+        } else { newHotkey = nil }
+        do { try config.save(to: Paths.config) }
+        catch { newHotkey?.stop(); throw error }
+        if let newHotkey { hotkey?.stop(); hotkey = newHotkey }
         session = replacement
         AppLog.shared.record("Settings saved")
         connectSession()

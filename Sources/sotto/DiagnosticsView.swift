@@ -51,6 +51,7 @@ final class DiagnosticsView: NSView {
             note("Audio goes directly to Groq using your account. All recordings stay in your chosen folder."),
             note("Connection check verifies authentication and the selected model listing. It does not record audio or test transcription/quota."),
             separator(), heading("Permissions"), microphone, micAction, accessibility, axButton,
+            note("If auto-paste still fails after enabling Sotto, remove its entry with −, add the current app again with +, then restart Sotto. This can be needed after development builds."),
             separator(), refreshButton
         ])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
