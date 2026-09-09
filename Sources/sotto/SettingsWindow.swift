@@ -314,9 +314,9 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     }
 
     private func refreshUpdates() {
-        updateStatus.stringValue = updates.statusItem.title
-        updateStatus.toolTip = updates.statusItem.toolTip ?? updates.statusItem.title
-        checkUpdates.isEnabled = updates.checkItem.isEnabled
+        updateStatus.stringValue = updates.status
+        updateStatus.toolTip = updates.detail ?? updates.status
+        checkUpdates.isEnabled = !updates.isChecking
         downloadUpdate.isHidden = updates.downloadItem.isHidden
     }
 

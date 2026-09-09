@@ -4,8 +4,9 @@ import SottoCore
 /// One request at launch and daily. No updater framework, disk cache, or installer.
 @MainActor
 final class UpdateChecker: NSObject {
-    let checkItem = NSMenuItem(title: "Check for Updates", action: nil, keyEquivalent: "")
-    let statusItem = NSMenuItem(title: "Updates not checked", action: nil, keyEquivalent: "")
+    private(set) var status = "Updates not checked"
+    private(set) var detail: String?
+    var isChecking: Bool { request != nil }
     let downloadItem = NSMenuItem(title: "Download Update…", action: nil, keyEquivalent: "")
     var onChange: (() -> Void)?
     private var releaseURL: URL?
@@ -19,8 +20,6 @@ final class UpdateChecker: NSObject {
          fetch: @escaping @Sendable (String) async throws -> AppRelease = UpdateChecker.fetchLatest) {
         self.version = version; self.fetch = fetch
         super.init()
-        checkItem.target = self; checkItem.action = #selector(check)
-        statusItem.isEnabled = false
         downloadItem.target = self; downloadItem.action = #selector(download)
         downloadItem.isHidden = true
     }
@@ -39,22 +38,21 @@ final class UpdateChecker: NSObject {
             }
         } else {
             request?.cancel(); request = nil
-            checkItem.isEnabled = true
-            statusItem.title = "Automatic update checks off"
+            status = "Automatic update checks off"
+            detail = nil
             onChange?()
         }
     }
 
     @objc func check() {
         guard request == nil else { return }
-        checkItem.isEnabled = false
-        statusItem.title = "Checking for updates…"
-        statusItem.toolTip = nil
+        status = "Checking for updates…"
+        detail = nil
         request = Task { [weak self] in
             guard let self else { return }
             defer {
                 // A cancelled request must not clear a newer request after re-enabling.
-                if !Task.isCancelled { request = nil; checkItem.isEnabled = true; onChange?() }
+                if !Task.isCancelled { request = nil; onChange?() }
             }
             do {
                 try Task.checkCancellation()
@@ -66,16 +64,16 @@ final class UpdateChecker: NSObject {
                 releaseURL = try release.updateURL(currentVersion: version)
                 downloadItem.isHidden = releaseURL == nil
                 downloadItem.title = "Download Sotto \(release.tag_name)…"
-                statusItem.title = releaseURL == nil ? "Sotto is up to date · checked \(Date().formatted(date: .omitted, time: .shortened))" : "Sotto \(release.tag_name) is available"
-                AppLog.shared.record("Updates: \(statusItem.title)")
+                status = releaseURL == nil ? "Sotto is up to date · checked \(Date().formatted(date: .omitted, time: .shortened))" : "Sotto \(release.tag_name) is available"
+                AppLog.shared.record("Updates: \(status)")
             } catch let pending as AppRelease.DownloadPending {
                 releaseURL = nil; downloadItem.isHidden = true
-                statusItem.title = pending.localizedDescription
-                AppLog.shared.record("Updates: \(statusItem.title)")
+                status = pending.localizedDescription
+                AppLog.shared.record("Updates: \(status)")
             } catch {
                 guard !Task.isCancelled else { return }
-                statusItem.title = "Couldn’t check for updates · try again"
-                statusItem.toolTip = error.localizedDescription
+                status = "Couldn’t check for updates · try again"
+                detail = error.localizedDescription
                 AppLog.shared.record("Update check: \(error.localizedDescription)", error: true)
             }
         }
@@ -102,7 +100,7 @@ final class UpdateChecker: NSObject {
     @objc func download() {
         guard let releaseURL else { return }
         if !NSWorkspace.shared.open(releaseURL) {
-            statusItem.title = "Couldn’t open the release page"
+            status = "Couldn’t open the release page"
             onChange?()
             AppLog.shared.record("Could not open \(releaseURL.absoluteString)", error: true)
         }

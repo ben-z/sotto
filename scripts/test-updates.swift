@@ -18,8 +18,8 @@ actor Requests {
         }
         func finish(_ checker: UpdateChecker) async throws {
             let deadline = Date().addingTimeInterval(3)
-            while !checker.checkItem.isEnabled && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-            try expect(checker.checkItem.isEnabled, "Update request did not complete")
+            while checker.isChecking && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            try expect(!checker.isChecking, "Update request did not complete")
         }
         let latest = try release("v0.1.2")
         let requests = Requests()
@@ -29,7 +29,7 @@ actor Requests {
             return latest
         }
         checker.configure(automatic: false)
-        try expect(checker.statusItem.title == "Automatic update checks off", "Disabled startup status")
+        try expect(checker.status == "Automatic update checks off", "Disabled startup status")
         try expect(await requests.count == 0, "Disabled checks made a request")
         checker.check(); checker.check()
         try await finish(checker)
@@ -39,11 +39,13 @@ actor Requests {
         let current = UpdateChecker(version: "0.1.2") { _ in latest }
         current.configure(automatic: true)
         try await finish(current)
-        try expect(current.downloadItem.isHidden && current.statusItem.title.contains("up to date"), "Current release state")
+        try expect(current.downloadItem.isHidden && current.status.contains("up to date"), "Current release state")
         current.configure(automatic: false)
         let failed = UpdateChecker(version: "0.1.1") { _ in throw URLError(.notConnectedToInternet) }
         failed.check(); try await finish(failed)
-        try expect(failed.statusItem.title.contains("Couldn’t check") && failed.statusItem.toolTip != nil, "Offline errors must be visible")
+        try expect(failed.status.contains("Couldn’t check") && failed.detail != nil, "Offline errors must be visible")
+        failed.configure(automatic: false)
+        try expect(failed.detail == nil, "Disabling must clear stale error details")
         try expect(failed.downloadItem.isHidden, "Failure must not offer an unknown release")
         let attempts = Requests()
         let retry = UpdateChecker(version: "0.1.1") { _ in
@@ -52,7 +54,7 @@ actor Requests {
         }
         retry.check(); try await finish(retry)
         retry.check(); try await finish(retry)
-        try expect(!retry.downloadItem.isHidden && retry.statusItem.toolTip == nil, "Retry must recover and clear error details")
+        try expect(!retry.downloadItem.isHidden && retry.detail == nil, "Retry must recover and clear error details")
         let race = UpdateChecker(version: "0.1.1") { _ in
             // Simulate a transport that completes even after cancellation.
             try? await Task.sleep(for: .milliseconds(30))
@@ -72,11 +74,11 @@ actor Requests {
         var notifications = 0
         pending.onChange = { notifications += 1 }
         pending.check(); try await finish(pending)
-        try expect(pending.statusItem.title.contains("being prepared") && pending.downloadItem.isHidden, "Pending download must have a specific status")
+        try expect(pending.status.contains("being prepared") && pending.downloadItem.isHidden, "Pending download must have a specific status")
         try expect(notifications >= 2, "Settings must receive progress and completion")
         let missing = UpdateChecker(version: nil) { _ in latest }
         missing.check(); try await finish(missing)
-        try expect(missing.statusItem.title.contains("Couldn’t check"), "Missing version must fail")
+        try expect(missing.status.contains("Couldn’t check"), "Missing version must fail")
         print("Update checks passed: disabled, manual, duplicate, current, available, offline, retry, cancellation, missing version")
     }
 }
