@@ -21,7 +21,9 @@ public final class NoteLibrary: ObservableObject {
         var records: [RecordingRecord] = []
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         for url in files where url.pathExtension == "json" && !url.lastPathComponent.hasSuffix(".response.json") {
-            var note = try decoder.decode(RecordingRecord.self, from: Data(contentsOf: url))
+            var note: RecordingRecord
+            do { note = try decoder.decode(RecordingRecord.self, from: Data(contentsOf: url)) }
+            catch { throw SottoError("Cannot read \(url.lastPathComponent): \(error.localizedDescription)") }
             guard note.id == url.deletingPathExtension().lastPathComponent,
                   note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata in \(url.lastPathComponent)") }
             if recover && note.status == "transcribing" { note.status = "queued"; try archive.save(note) }

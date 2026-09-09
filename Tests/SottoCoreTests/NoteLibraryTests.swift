@@ -128,3 +128,14 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(library.transcribingID == nil)
     #expect(try NoteLibrary(directory: directory).notes.first?.status == "queued")
 }
+
+@MainActor @Test func unreadableMetadataIdentifiesTheFile() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data("{".utf8).write(to: directory.appendingPathComponent("broken.json"))
+    do {
+        _ = try NoteLibrary(directory: directory)
+        Issue.record("Corrupt metadata must be reported")
+    } catch { #expect(error.localizedDescription.contains("broken.json")) }
+}

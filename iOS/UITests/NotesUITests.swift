@@ -2,6 +2,28 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    func testEditedNoteSurvivesRelaunch() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let fixture = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UI test fixture")).firstMatch
+        XCTAssertTrue(fixture.waitForExistence(timeout: 10), "Run scripts/seed-ios-fixture.py before this test")
+        fixture.tap()
+        XCTAssertTrue(app.staticTexts["Original fixture transcript."].exists)
+        app.buttons["Edit"].tap()
+        let editor = app.textViews["Note text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.tap()
+        editor.typeText(" Added locally.")
+        app.buttons["Save"].tap()
+        app.terminate(); app.launch()
+        fixture.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Added locally.")).firstMatch.waitForExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Edited retained note"; attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testKeyOnboarding() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -53,6 +75,9 @@ final class NotesUITests: XCTestCase {
         app.tap()
         let stop = app.buttons["Stop recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 15), "Recording must become responsive")
+        let recordingImage = XCTAttachment(screenshot: app.screenshot())
+        recordingImage.name = "Recording"; recordingImage.lifetime = .keepAlways
+        add(recordingImage)
         // The wait gives the encoder enough audio to produce a playable file.
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
         XCUIDevice.shared.press(.home)
@@ -62,6 +87,10 @@ final class NotesUITests: XCTestCase {
         stop.tap()
         XCTAssertTrue(saved.waitForExistence(timeout: 10), "Recording must save without a Groq key")
         saved.tap()
+        app.buttons["Play recording"].tap()
+        let playback = app.buttons["Stop playback"]
+        XCTAssertTrue(playback.waitForExistence(timeout: 5), "Saved audio must be playable")
+        playback.tap()
         app.buttons["Edit"].tap()
         let title = "Test note \(UUID().uuidString.prefix(8))"
         app.textFields["Title"].tap()
