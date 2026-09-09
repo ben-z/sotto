@@ -16,6 +16,27 @@ final class NotesUITests: XCTestCase {
         XCTAssertTrue(app.buttons["record-note"].waitForExistence(timeout: 5))
     }
 
+    func testRejectedKeyIsNotSaved() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        let key = app.secureTextFields["Groq API key"]
+        XCTAssertTrue(key.waitForExistence(timeout: 5), "This test requires a simulator without a saved key")
+        key.tap(); key.typeText("sotto-invalid-test-key")
+        let save = app.buttons["Save and check key"]
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        XCTAssertTrue(app.staticTexts["Key rejected by Groq (HTTP 401). Check the API key and try again."].waitForExistence(timeout: 25), "The live Groq key check must reject the test key")
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Rejected Groq key"; attachment.lifetime = .keepAlways
+        add(attachment)
+        app.buttons["Done"].tap()
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.secureTextFields["Groq API key"].waitForExistence(timeout: 5))
+    }
+
     func testRecordEditAndRecoverWithoutKey() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -28,7 +49,8 @@ final class NotesUITests: XCTestCase {
             return false
         }
         record.tap()
-        if app.alerts.firstMatch.waitForExistence(timeout: 2) { app.tap() }
+        // Trigger the interruption handler even when the permission alert belongs to SpringBoard.
+        app.tap()
         let stop = app.buttons["Stop recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 15), "Recording must become responsive")
         // The wait gives the encoder enough audio to produce a playable file.

@@ -40,7 +40,7 @@ public struct GroqClient: Sendable {
     static func validateKeyResponse(_ data: Data, statusCode: Int, model: String) throws {
         switch statusCode {
         case 200: break
-        case 401: throw SottoError("Key rejected by Groq (HTTP 401). Replace the saved API key.")
+        case 401: throw SottoError("Key rejected by Groq (HTTP 401). Check the API key and try again.")
         case 403: throw SottoError("Access denied by Groq (HTTP 403). Check project/account permissions.")
         case 429: throw SottoError("Groq rate limit reached (HTTP 429). Try again later; this does not mean the key is invalid.")
         default: throw SottoError("Groq check failed (HTTP \(statusCode)). Key validity could not be confirmed.")

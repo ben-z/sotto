@@ -348,32 +348,38 @@ struct SettingsView: View {
     @State private var folderPicker = false
     @State private var folderError: String?
     @State private var checking = false
-    @State private var message: String?
+    @State private var keyResult: Result<String, Error>?
     var body: some View {
         NavigationStack {
             Form {
                 Section("Transcription") {
                     Text(store.keyStored ? "API key saved in this iPhone’s Keychain" : "Add a Groq API key to transcribe your recordings.")
-                    SecureField(store.keyStored ? "Replace API key" : "Groq API key", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField(store.keyStored ? "Replace API key" : "Groq API key", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled().disabled(checking)
                     Button(checking ? "Checking key…" : "Save and check key") {
                         Task {
-                            checking = true; message = nil
+                            let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                            checking = true; keyResult = nil
                             defer { checking = false }
                             do {
-                                try await GroqClient().verifyKey(key.trimmingCharacters(in: .whitespacesAndNewlines), model: model)
-                                try GroqKeychain.save(key); key = ""; store.refreshKey(); store.resume()
-                                message = "Key verified and saved. Queued recordings will transcribe automatically."
-                            } catch { message = error.localizedDescription }
+                                try await GroqClient().verifyKey(candidate, model: model)
+                                try GroqKeychain.save(candidate); key = ""; store.refreshKey(); store.resume()
+                                keyResult = .success("Key verified and saved. Queued recordings will transcribe automatically.")
+                            } catch { keyResult = .failure(error) }
                         }
                     }.disabled(checking || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Link("Create a Groq API key", destination: URL(string: "https://console.groq.com/keys")!)
                     if store.keyStored {
                         Button("Delete API key", role: .destructive) {
-                            do { try store.deleteKey(); message = "API key deleted. Your recordings are retained." }
-                            catch { message = error.localizedDescription }
+                            do { try store.deleteKey(); keyResult = .success("API key deleted. Your recordings are retained.") }
+                            catch { keyResult = .failure(error) }
+                        }.disabled(checking)
+                    }
+                    if let keyResult {
+                        switch keyResult {
+                        case .success(let message): Text(message).font(.callout).foregroundStyle(.secondary)
+                        case .failure(let error): Text(error.localizedDescription).font(.callout).foregroundStyle(.red).textSelection(.enabled)
                         }
                     }
-                    if let message { Text(message).font(.caption).textSelection(.enabled) }
                 }
                 Section {
                     Picker("Language", selection: $language) { Text("English").tag("en"); Text("Detect automatically").tag("") }

@@ -29,7 +29,7 @@ xcodebuild -project iOS/Sotto.xcodeproj -scheme Sotto \
   -derivedDataPath .build/ios CODE_SIGN_IDENTITY=- test
 ```
 
-The UI test requires a simulator with microphone input and no Groq key. It records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
+The UI tests require a simulator with microphone input, internet access, and no Groq key. The rejected-key check contacts Groq with an intentionally invalid test key and verifies it is not saved. The recording test records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
 
 ## Architecture
 

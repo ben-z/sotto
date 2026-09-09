@@ -29,13 +29,17 @@ jobs:
         run: swift test
       - name: Record, edit, and recover a note
         run: |
-          xcodebuild -project iOS/Sotto.xcodeproj -scheme Sotto \
-            -destination "platform=iOS Simulator,id=$SOTTO_TEST_DEVICE" \
-            -derivedDataPath .build/ios CODE_SIGN_IDENTITY=- \
+          build=(-project iOS/Sotto.xcodeproj -scheme Sotto
+            -destination "platform=iOS Simulator,id=$SOTTO_TEST_DEVICE"
+            -derivedDataPath .build/ios CODE_SIGN_IDENTITY=-)
+          xcodebuild "${build[@]}" build-for-testing
+          xcrun simctl install "$SOTTO_TEST_DEVICE" .build/ios/Build/Products/Debug-iphonesimulator/Sotto.app
+          xcrun simctl privacy "$SOTTO_TEST_DEVICE" grant microphone dev.sotto.notes
+          xcodebuild "${build[@]}" \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 90 \
             -maximum-test-execution-time-allowance 120 \
-            -resultBundlePath work/ios-tests.xcresult test
+            -resultBundlePath work/ios-tests.xcresult test-without-building
       - name: Collect app diagnostics
         if: always()
         run: |
