@@ -1,12 +1,13 @@
 import AVFoundation
 import Combine
+import CoreLocation
 import Network
 import OSLog
 import SottoCore
 import UIKit
 
 @MainActor
-final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate {
+final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocationManagerDelegate {
     static let shared = NotesStore()
     @Published var library: NoteLibrary?
     @Published var recording: RecordingRecord?
@@ -14,6 +15,21 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var error: String?
     @Published var playingID: String?
     @Published var keyStored = false
+    @Published var locationEnabled = UserDefaults.standard.bool(forKey: "notes.location") {
+        didSet {
+            UserDefaults.standard.set(locationEnabled, forKey: "notes.location")
+            if locationEnabled { locationManager.requestWhenInUseAuthorization() }
+            else { locationNoteID = nil; locationMessage = nil }
+        }
+    }
+    @Published var locationMessage: String?
+    private lazy var locationManager: CLLocationManager = {
+        let manager = CLLocationManager()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        return manager
+    }()
+    private var locationNoteID: String?
     private let recorder = Recorder()
     private let log = Logger(subsystem: "dev.sotto.notes", category: "audio")
     private var player: AVAudioPlayer?
@@ -94,6 +110,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 try library.save(failed); throw error
             }
             recording = note
+            captureLocation(for: note)
             log.notice("Recording \(note.id, privacy: .public)")
             deadline = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(1800)); self?.finish() } catch { }
@@ -147,8 +164,63 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate {
         try GroqKeychain.delete(); refreshKey(); worker?.cancel()
     }
 
-    func retry(_ note: RecordingRecord) {
-        do { try library?.queue(note); resume() } catch { self.error = error.localizedDescription }
+    func transcribe(_ ids: Set<String>, model: String, language: String?) throws {
+        guard keyStored, let library else { throw SottoError("Add a Groq API key in Settings first.") }
+        try library.transcribe(ids, model: model, language: language)
+        resume()
+    }
+
+    func delete(_ ids: Set<String>) throws {
+        if let playingID, ids.contains(playingID) { stopPlayback() }
+        try library?.delete(ids)
+    }
+
+    private func captureLocation(for note: RecordingRecord) {
+        guard locationEnabled else { return }
+        locationNoteID = note.id
+        switch locationManager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse: locationManager.requestLocation()
+        case .notDetermined: locationManager.requestWhenInUseAuthorization()
+        default: saveLocation(nil, message: "Location access is disabled in iPhone Settings.")
+        }
+    }
+
+    private func saveLocation(_ location: RecordingLocation?, message: String?) {
+        locationMessage = message
+        defer { locationNoteID = nil }
+        guard let id = locationNoteID, let library, var note = library.notes.first(where: { $0.id == id }) else { return }
+        note.location = location; note.locationStatus = message
+        do { try library.save(note) } catch { self.error = "Cannot save location: \(error.localizedDescription)" }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor [weak self] in
+            guard let self, self.locationEnabled else { return }
+            switch self.locationManager.authorizationStatus {
+            case .authorizedAlways, .authorizedWhenInUse:
+                self.locationMessage = nil
+                if self.locationNoteID != nil { self.locationManager.requestLocation() }
+            case .denied, .restricted: self.saveLocation(nil, message: "Location access is disabled in iPhone Settings.")
+            default: break
+            }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        let location = locations.last
+        Task { @MainActor [weak self] in
+            guard let self, self.locationEnabled else { return }
+            guard let location, location.horizontalAccuracy >= 0, abs(location.timestamp.timeIntervalSinceNow) < 60 else {
+                self.saveLocation(nil, message: "Location was unavailable when this recording started."); return
+            }
+            self.saveLocation(RecordingLocation(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude, accuracyMeters: location.horizontalAccuracy), message: nil)
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        Task { @MainActor [weak self] in
+            self?.saveLocation(nil, message: "Location unavailable: \(error.localizedDescription)")
+        }
     }
 
     func play(_ note: RecordingRecord) {

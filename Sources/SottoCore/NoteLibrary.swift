@@ -32,6 +32,12 @@ public final class NoteLibrary: ObservableObject {
                 note.error = "Recording was interrupted. The retained audio may be incomplete."
                 try archive.save(note)
             }
+            if note.generatedTitle == nil && note.status == "complete" {
+                let transcript = archive.directory.appendingPathComponent("\(note.id).txt")
+                if FileManager.default.fileExists(atPath: transcript.path) {
+                    note.generatedTitle = RecordingRecord.suggestedTitle(from: try String(contentsOf: transcript, encoding: .utf8))
+                }
+            }
             records.append(note)
         }
         notes = records.sorted { $0.startedAt > $1.startedAt }
@@ -56,6 +62,42 @@ public final class NoteLibrary: ObservableObject {
         note.status = "queued"; note.error = nil; note.audioBytes = size
         if let duration { note.durationSeconds = duration }
         try save(note)
+    }
+
+    public func transcribe(_ ids: Set<String>, model: String, language: String?) throws {
+        let selected = try editableNotes(ids)
+        // Validate the whole selection before changing its queue state.
+        for note in selected {
+            let size = try archive.audioURL(note).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size > 0 else { throw SottoError("\(note.displayTitle) has no audio to transcribe.") }
+        }
+        for var note in selected {
+            if note.transcribedModel == nil && note.status == "complete" { note.transcribedModel = note.model }
+            note.model = model; note.language = language
+            note.status = "queued"; note.error = nil
+            try save(note)
+        }
+    }
+
+    private func editableNotes(_ ids: Set<String>) throws -> [RecordingRecord] {
+        let selected = notes.filter { ids.contains($0.id) }
+        guard selected.count == ids.count else { throw SottoError("Some selected notes are no longer available.") }
+        guard !selected.contains(where: { $0.status == "recording" || $0.id == transcribingID || $0.status == "transcribing" }) else {
+            throw SottoError("Wait for recording or transcription to finish before changing these notes.")
+        }
+        return selected
+    }
+
+    public func delete(_ ids: Set<String>) throws {
+        let selected = try editableNotes(ids)
+        for note in selected {
+            // Metadata goes last so a failed removal remains visible and can be retried.
+            for ext in ["m4a", "txt", "md", "response.json", "json"] {
+                let url = archive.directory.appendingPathComponent("\(note.id).\(ext)")
+                if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            }
+            notes.removeAll { $0.id == note.id }
+        }
     }
 
     public func text(for note: RecordingRecord) throws -> String {

@@ -4,6 +4,16 @@ An experimental native iPhone/iPad app for recording thoughts and turning them i
 
 Audio is saved locally before transcription. Add your Groq API key in Settings to process queued recordings. Notes remain usable without a key or connection: you can play audio, add a title, write text, and share the recording. Transcriptions run one at a time while the app is open. Offline work stays queued; rejected requests show an error and can be retried.
 
+## Working with notes
+
+Tap a note’s title to rename it, or long-press a list row and choose **Rename**. Untitled notes use a short excerpt from the transcript automatically; this runs locally and makes no extra API request. Clearing a custom title restores the automatic title.
+
+Note details show the model used for the latest successful transcription. **Retranscribe** lets you choose a model and language for a new attempt. It replaces the machine transcript and raw response, while preserving your edited note text and custom title. Expand **Machine transcript** to read the new result separately from your edits.
+
+Use **Select** on the main list to transcribe or delete several notes. Swipe or long-press a row to delete one. Deletion requires confirmation and permanently removes the audio, metadata, transcripts, and edits. Active recordings and transcriptions cannot be deleted or requeued.
+
+Dates include a timezone. New recordings retain the timezone where they were started; older notes without that metadata use your current timezone. **Save recording location** in Settings is optional and off by default. It captures one location fix, stores coordinates and accuracy locally, and links to Maps. It does not track movement in the background or send location to Groq. Unavailable or denied location never prevents recording.
+
 ## Storage and privacy
 
 The default library is **Files → On My iPhone → Sotto → Recordings**. Settings lets you choose another library folder; existing notes remain in their original folder. Every note has AAC audio and JSON metadata. Completed transcriptions add the original `.txt` transcript and Groq `.response.json`; editing creates a separate `.md` file. Original audio and machine output are retained. Back up the folder before deleting Sotto.

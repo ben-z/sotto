@@ -156,3 +156,75 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(try library.text(for: note) == "Already received")
     #expect(library.issue == nil)
 }
+
+@MainActor @Test func retranscriptionKeepsEditsAndTracksCompletedModel() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let note = try queuedNote(library)
+    await library.process(key: { "fixture" }) { _, _, _ in
+        TranscriptionResult(text: "Planning the next garden project", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
+    }
+    #expect(library.notes[0].displayTitle == "Planning the next garden project")
+    try library.rename(note, to: "Garden")
+    try library.saveText("My own notes", for: note)
+    try library.transcribe([note.id], model: "whisper-large-v3", language: nil)
+    #expect(library.notes[0].transcribedModel == "whisper-large-v3-turbo")
+    await library.process(key: { "fixture" }) { _, _, request in
+        #expect(request.model == "whisper-large-v3")
+        #expect(request.language == nil)
+        return TranscriptionResult(text: "A better transcript", rawResponse: Data("{}".utf8), milliseconds: 2, requestID: nil)
+    }
+    let restored = try NoteLibrary(directory: directory)
+    #expect(restored.notes[0].displayTitle == "Garden")
+    #expect(restored.notes[0].transcribedModel == "whisper-large-v3")
+    #expect(try restored.text(for: note) == "My own notes")
+    try restored.rename(note, to: " ")
+    #expect(restored.notes[0].displayTitle == "A better transcript")
+    #expect(try String(contentsOf: directory.appendingPathComponent("\(note.id).txt"), encoding: .utf8) == "A better transcript")
+}
+
+@MainActor @Test func batchDeletionRemovesOnlySelectedNotesAndProtectsActiveWork() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let first = try queuedNote(library)
+    let second = try queuedNote(library)
+    let active = try library.create(model: "fixture", language: "en")
+    #expect(throws: (any Error).self) { try library.delete([first.id, active.id]) }
+    #expect(FileManager.default.fileExists(atPath: library.archive.audioURL(first).path))
+    try library.saveText("Edited", for: first)
+    await library.process(key: { "fixture" }) { _, _, note in
+        #expect(throws: (any Error).self) { try library.delete([note.id]) }
+        return TranscriptionResult(text: "Transcript", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
+    }
+    try library.delete([first.id, second.id])
+    #expect(library.notes.map(\.id) == [active.id])
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["\(active.id).json"])
+}
+
+@MainActor @Test func batchTranscriptionValidatesWholeSelectionBeforeQueueing() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    var first = try queuedNote(library)
+    first.status = "complete"; try library.save(first)
+    let active = try library.create(model: "fixture", language: nil)
+    #expect(throws: (any Error).self) { try library.transcribe([first.id, active.id], model: "new", language: nil) }
+    #expect(library.notes.first { $0.id == first.id }?.status == "complete")
+    #expect(library.notes.first { $0.id == first.id }?.model == first.model)
+}
+
+@MainActor @Test func recordingPlaceAndTimeZoneSurviveRelaunch() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    var note = try queuedNote(library)
+    note.timeZoneIdentifier = "America/Los_Angeles"
+    note.location = RecordingLocation(latitude: 37.3, longitude: -122.1, accuracyMeters: 100)
+    try library.save(note)
+    let restored = try NoteLibrary(directory: directory).notes[0]
+    #expect(restored.timeZoneIdentifier == "America/Los_Angeles")
+    #expect(restored.location?.latitude == 37.3)
+    #expect(restored.location?.accuracyMeters == 100)
+}

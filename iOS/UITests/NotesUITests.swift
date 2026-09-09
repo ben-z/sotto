@@ -2,6 +2,58 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    func testBatchDeletionAndCancel() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["Select"].waitForExistence(timeout: 10))
+        app.buttons["Select"].tap()
+        app.buttons["note-ios-delete-fixture-a"].tap()
+        app.buttons["note-ios-delete-fixture-b"].tap()
+        XCTAssertTrue(app.staticTexts["2 selected"].exists)
+        app.buttons["Transcribe…"].tap()
+        XCTAssertTrue(app.staticTexts["Transcribe 2 recording(s)"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Transcribe"].isEnabled)
+        app.buttons["Cancel"].tap()
+        app.buttons["Delete"].tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["note-ios-delete-fixture-a"].exists)
+        app.buttons["Delete"].tap()
+        app.buttons["Delete permanently"].tap()
+        XCTAssertFalse(app.buttons["note-ios-delete-fixture-a"].exists)
+        XCTAssertFalse(app.buttons["note-ios-delete-fixture-b"].exists)
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["note-ios-ui-fixture"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["note-ios-delete-fixture-a"].exists)
+    }
+
+    func testQuickRenameAndRetranscriptionOptions() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let fixture = app.buttons["note-ios-ui-fixture"]
+        XCTAssertTrue(fixture.waitForExistence(timeout: 10)); fixture.tap()
+        app.buttons["Rename note"].tap()
+        let title = app.alerts.textFields["Title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (title.value as? String ?? "").count))
+        title.typeText("Quick title")
+        app.alerts.buttons["Save"].tap()
+        XCTAssertTrue(app.staticTexts["Quick title"].exists)
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["whisper-large-v3-turbo"].exists)
+        app.buttons["Retranscribe…"].tap()
+        XCTAssertTrue(app.buttons["Transcribe"].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+        app.swipeDown()
+        app.buttons["Rename note"].tap()
+        title.tap()
+        title.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Quick title".count))
+        title.typeText("UI test fixture")
+        app.alerts.buttons["Save"].tap()
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Note details"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     func testEditedNoteSurvivesRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -66,10 +118,18 @@ final class NotesUITests: XCTestCase {
         let record = app.buttons["record-note"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         addUIInterruptionMonitor(withDescription: "Microphone permission") { alert in
-            let allow = alert.buttons["Allow"]
-            if allow.exists { allow.tap(); return true }
+            for label in ["Allow While Using App", "Allow"] {
+                let allow = alert.buttons[label]
+                if allow.exists { allow.tap(); return true }
+            }
             return false
         }
+        app.buttons["Settings"].tap()
+        app.swipeUp()
+        let location = app.switches["Save recording location"]
+        XCTAssertTrue(location.waitForExistence(timeout: 5))
+        if location.value as? String == "0" { location.tap(); app.tap() }
+        app.buttons["Done"].tap()
         record.tap()
         // Trigger the interruption handler even when the permission alert belongs to SpringBoard.
         app.tap()
@@ -87,6 +147,7 @@ final class NotesUITests: XCTestCase {
         stop.tap()
         XCTAssertTrue(saved.waitForExistence(timeout: 10), "Recording must save without a Groq key")
         saved.tap()
+        XCTAssertTrue(app.buttons["recording-location"].waitForExistence(timeout: 10), "The simulated location must be saved with the recording")
         app.buttons["Play recording"].tap()
         let playback = app.buttons["Stop playback"]
         XCTAssertTrue(playback.waitForExistence(timeout: 5), "Saved audio must be playable")

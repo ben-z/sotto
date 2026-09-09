@@ -30,3 +30,13 @@ text = "Original fixture transcript."
     "requestMilliseconds": 1, "requestID": "fixture",
 }))
 print(f"Seeded UI test fixture in {library}")
+
+# Dedicated rows for destructive UI checks; never reuse the editor fixture.
+for suffix in ("a", "b"):
+    identifier = f"ios-delete-fixture-{suffix}"
+    record = json.loads((library / "ios-ui-fixture.json").read_text())
+    record.update(id=identifier, title=f"Delete fixture {suffix.upper()}", audioFile=f"{identifier}.m4a")
+    shutil.copyfile(fixture, library / record["audioFile"])
+    (library / f"{identifier}.json").write_text(json.dumps(record))
+    (library / f"{identifier}.txt").write_text(text)
+    (library / f"{identifier}.response.json").write_text(json.dumps({"text": text}))

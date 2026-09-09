@@ -2,9 +2,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 import SottoCore
 
-private func title(_ note: RecordingRecord) -> String {
-    if let title = note.title, !title.isEmpty { return title }
-    return "Voice note"
+private func timestamp(_ note: RecordingRecord) -> String {
+    let formatter = DateFormatter()
+    formatter.timeZone = note.timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
+    formatter.setLocalizedDateFormatFromTemplate("MMM d yyyy jmm zzz")
+    return formatter.string(from: note.startedAt)
 }
 
 private func status(_ note: RecordingRecord, keyStored: Bool) -> String {
@@ -22,9 +24,21 @@ struct NotesView: View {
     @ObservedObject var store: NotesStore
     @ObservedObject var library: NoteLibrary
     @State private var settings = false
+    @State private var editMode = EditMode.inactive
+    @State private var selection = Set<String>()
+    @State private var deleting = Set<String>()
+    @State private var confirmDelete = false
+    @State private var transcribing = false
+    @State private var transcriptionIDs = Set<String>()
+    @State private var renaming: RecordingRecord?
+    @State private var renameShown = false
+    @State private var draftTitle = ""
+    private var selectionBusy: Bool {
+        library.notes.contains { selection.contains($0.id) && ["recording", "transcribing"].contains($0.status) }
+    }
     var body: some View {
         NavigationStack {
-            List {
+            List(selection: $selection) {
                 if library.notes.isEmpty {
                     ContentUnavailableView("Your voice notes", systemImage: "waveform", description: Text("Record audio, then turn it into text with Groq. Original recordings are saved locally."))
                         .listRowBackground(Color.clear)
@@ -34,43 +48,101 @@ struct NotesView: View {
                         NoteView(store: store, library: library, id: note.id)
                     } label: {
                         VStack(alignment: .leading, spacing: 7) {
-                            Text(title(note)).font(.headline)
-                            Text(note.startedAt, format: .dateTime.month(.abbreviated).day().hour().minute()).font(.subheadline).foregroundStyle(.secondary)
+                            Text(note.displayTitle).font(.headline).lineLimit(2)
+                            Text(timestamp(note)).font(.subheadline).foregroundStyle(.secondary)
                             Label(status(note, keyStored: store.keyStored), systemImage: note.status == "complete" ? "text.alignleft" : "waveform")
                                 .font(.caption).foregroundStyle(note.status == "recording" ? .red : .secondary)
                         }.padding(.vertical, 5)
+                    }
+                    .accessibilityIdentifier("note-\(note.id)")
+                    .tag(note.id)
+                    .contextMenu {
+                        Button("Rename", systemImage: "pencil") {
+                            renaming = note; draftTitle = note.title ?? note.generatedTitle ?? ""; renameShown = true
+                        }
+                        Button("Transcribe…", systemImage: "waveform") {
+                            transcriptionIDs = [note.id]; transcribing = true
+                        }.disabled(["recording", "transcribing"].contains(note.status))
+                        Button("Delete", systemImage: "trash", role: .destructive) { requestDelete([note.id]) }
+                            .disabled(["recording", "transcribing"].contains(note.status))
+                    }
+                    .swipeActions {
+                        Button("Delete", role: .destructive) { requestDelete([note.id]) }
+                            .disabled(["recording", "transcribing"].contains(note.status))
                     }
                 }
                 if let error = store.error ?? library.issue {
                     Section { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
                 }
             }
+            .environment(\.editMode, $editMode)
             .navigationTitle("Notes")
-            .toolbar { Button("Settings", systemImage: "gearshape") { settings = true } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(editMode.isEditing ? "Done" : "Select") {
+                        editMode = editMode.isEditing ? .inactive : .active; selection.removeAll()
+                    }.disabled(library.notes.isEmpty || store.recording != nil || store.preparing)
+                }
+                ToolbarItem(placement: .topBarTrailing) { Button("Settings", systemImage: "gearshape") { settings = true } }
+            }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
-                    if store.preparing { ProgressView("Preparing microphone") }
-                    if let note = store.recording {
-                        Text(note.startedAt, style: .timer).monospacedDigit().font(.title2)
-                        Text("Recording · Original audio is retained").font(.caption).foregroundStyle(.secondary)
+                    if editMode.isEditing {
+                        Text("\(selection.count) selected").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Transcribe…", systemImage: "waveform") { transcriptionIDs = selection; transcribing = true }
+                            Spacer()
+                            Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(selection) }
+                        }.disabled(selection.isEmpty || selectionBusy)
+                        if selectionBusy { Text("Wait for active recordings and transcriptions to finish.").font(.caption) }
+                    } else {
+                        if store.preparing { ProgressView("Preparing microphone") }
+                        if let note = store.recording {
+                            Text(note.startedAt, style: .timer).monospacedDigit().font(.title2)
+                            Text("Recording · Original audio is retained").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Button { Task { await store.toggleRecording() } } label: {
+                            Label(store.recording == nil ? "Record a note" : "Stop recording", systemImage: store.recording == nil ? "mic.fill" : "stop.fill")
+                                .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 10)
+                        }.buttonStyle(.borderedProminent).tint(store.recording == nil ? .accentColor : .red)
+                            .disabled(store.preparing).accessibilityIdentifier("record-note")
                     }
-                    Button { Task { await store.toggleRecording() } } label: {
-                        Label(store.recording == nil ? "Record a note" : "Stop recording", systemImage: store.recording == nil ? "mic.fill" : "stop.fill")
-                            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 10)
-                    }.buttonStyle(.borderedProminent).tint(store.recording == nil ? .accentColor : .red)
-                        .disabled(store.preparing).accessibilityIdentifier("record-note")
                 }.padding().background(.bar)
             }
+            .onChange(of: store.recording?.id) { _, id in
+                if id != nil { editMode = .inactive; selection.removeAll() }
+            }
             .sheet(isPresented: $settings) { SettingsView(store: store) }
+            .sheet(isPresented: $transcribing) { TranscribeSheet(store: store, ids: transcriptionIDs) }
+            .alert("Rename note", isPresented: $renameShown) {
+                TextField("Title", text: $draftTitle)
+                Button("Cancel", role: .cancel) { }
+                Button("Save") {
+                    if let renaming {
+                        do { try library.rename(renaming, to: draftTitle) } catch { store.error = error.localizedDescription }
+                    }
+                }
+            }
+            .confirmationDialog("Delete \(deleting.count) note(s)?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete permanently", role: .destructive) {
+                    do { try store.delete(deleting); selection.subtract(deleting) }
+                    catch { store.error = error.localizedDescription }
+                }
+            } message: { Text("The recordings, transcripts, and edited notes will be permanently deleted.") }
         }
     }
+    private func requestDelete(_ ids: Set<String>) { deleting = ids; confirmDelete = true }
 }
 
 struct NoteView: View {
     @ObservedObject var store: NotesStore
     @ObservedObject var library: NoteLibrary
+    @Environment(\.dismiss) private var dismiss
     let id: String
     @State private var editing = false
+    @State private var renaming = false
+    @State private var transcribing = false
+    @State private var deleting = false
     @State private var draft = ""
     @State private var draftTitle = ""
     @State private var error: String?
@@ -79,7 +151,15 @@ struct NoteView: View {
         if let note {
             List {
                 Section {
-                    Text(note.startedAt, format: .dateTime.month(.wide).day().year().hour().minute()).foregroundStyle(.secondary)
+                    Button { draftTitle = note.title ?? note.generatedTitle ?? ""; renaming = true } label: {
+                        HStack { Text(note.displayTitle).font(.headline).foregroundStyle(.primary); Spacer(); Image(systemName: "pencil") }
+                    }.accessibilityLabel("Rename note")
+                    Text(timestamp(note)).foregroundStyle(.secondary)
+                    if let location = note.location {
+                        Link(destination: URL(string: "https://maps.apple.com/?ll=\(location.latitude),\(location.longitude)")!) {
+                            Label("Recording location", systemImage: "mappin.and.ellipse")
+                        }.accessibilityIdentifier("recording-location")
+                    } else { Text(note.locationStatus ?? "Location not recorded").font(.caption).foregroundStyle(.secondary) }
                     HStack {
                         Button(store.playingID == id ? "Stop playback" : "Play recording", systemImage: store.playingID == id ? "stop.fill" : "play.fill") { store.play(note) }
                             .disabled(store.recording != nil)
@@ -93,17 +173,31 @@ struct NoteView: View {
                     case .success(let text):
                         if text.isEmpty { Text(status(note, keyStored: store.keyStored)).foregroundStyle(.secondary) }
                         else { Text(text).textSelection(.enabled); ShareLink("Share note", item: text) }
-                    case .failure(let error):
-                        Text("Cannot read note: \(error.localizedDescription)").foregroundStyle(.red)
+                    case .failure(let error): Text("Cannot read note: \(error.localizedDescription)").foregroundStyle(.red)
                     }
                     if let message = note.error { Text(message).font(.caption).foregroundStyle(.red) }
-                    if ["failed", "interrupted", "queued"].contains(note.status) {
-                        Button("Transcribe recording") { store.retry(note) }.disabled(!store.keyStored || library.transcribingID == id)
-                    }
                 }
+                Section("Transcription") {
+                    LabeledContent("Model", value: note.transcribedModel ?? (note.status == "complete" ? note.model : "Not transcribed"))
+                        .font(.subheadline).textSelection(.enabled)
+                    if note.status == "queued" || note.status == "transcribing" {
+                        LabeledContent(status(note, keyStored: store.keyStored), value: note.model).font(.caption)
+                    }
+                    if note.transcribedModel != nil || note.status == "complete" {
+                        DisclosureGroup("Machine transcript") {
+                            switch Result(catching: { try String(contentsOf: library.archive.directory.appendingPathComponent("\(id).txt"), encoding: .utf8) }) {
+                            case .success(let text): Text(text).textSelection(.enabled)
+                            case .failure(let error): Text(error.localizedDescription).foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    Button(note.transcribedModel != nil || note.status == "complete" ? "Retranscribe…" : "Transcribe…") { transcribing = true }
+                        .disabled(["recording", "transcribing"].contains(note.status))
+                }
+                Section { Button("Delete note", role: .destructive) { deleting = true }.disabled(["recording", "transcribing"].contains(note.status)) }
                 if let error = error ?? store.error { Text(error).foregroundStyle(.red) }
             }
-            .navigationTitle(title(note)).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Voice note").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 Button("Edit") {
                     do { draft = try library.text(for: note); draftTitle = note.title ?? ""; editing = true }
@@ -111,6 +205,17 @@ struct NoteView: View {
                 }
             }
             .onDisappear { store.stopPlayback() }
+            .alert("Rename note", isPresented: $renaming) {
+                TextField("Title", text: $draftTitle)
+                Button("Cancel", role: .cancel) { }
+                Button("Save") { do { try library.rename(note, to: draftTitle) } catch { self.error = error.localizedDescription } }
+            }
+            .confirmationDialog("Delete this note?", isPresented: $deleting, titleVisibility: .visible) {
+                Button("Delete permanently", role: .destructive) {
+                    do { try store.delete([id]); dismiss() } catch { self.error = error.localizedDescription }
+                }
+            } message: { Text("The recording, transcript, and edited note will be permanently deleted.") }
+            .sheet(isPresented: $transcribing) { TranscribeSheet(store: store, ids: [id]) }
             .sheet(isPresented: $editing) {
                 NavigationStack {
                     Form {
@@ -127,6 +232,41 @@ struct NoteView: View {
                         }
                 }
             }
+        }
+    }
+}
+
+struct TranscribeSheet: View {
+    @ObservedObject var store: NotesStore
+    let ids: Set<String>
+    @Environment(\.dismiss) private var dismiss
+    @State private var model = "whisper-large-v3-turbo"
+    @State private var language = "en"
+    @State private var error: String?
+    var body: some View {
+        NavigationStack {
+            Form {
+                Text("Transcribe \(ids.count) recording(s)")
+                Picker("Model", selection: $model) {
+                    Text("whisper-large-v3-turbo").tag("whisper-large-v3-turbo")
+                    Text("whisper-large-v3").tag("whisper-large-v3")
+                }
+                Picker("Language", selection: $language) { Text("English").tag("en"); Text("Detect automatically").tag("") }
+                Text("Audio is sent to Groq using your key. A new transcript replaces the machine transcript; your edited note text and custom title are kept.").font(.callout).foregroundStyle(.secondary)
+                if !store.keyStored { Text("Add a Groq API key in Settings first.").foregroundStyle(.secondary) }
+                if let error { Text(error).foregroundStyle(.red) }
+            }
+            .navigationTitle("Transcribe").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Transcribe") {
+                        do { try store.transcribe(ids, model: model, language: language.isEmpty ? nil : language); dismiss() }
+                        catch { self.error = error.localizedDescription }
+                    }.disabled(!store.keyStored)
+                }
+            }
+            .onAppear { model = store.model; language = store.language ?? "" }
         }
     }
 }
@@ -180,6 +320,10 @@ struct SettingsView: View {
                         Text("whisper-large-v3").tag("whisper-large-v3")
                     }
                 } footer: { Text("Applies to new recordings. Audio is sent to Groq for transcription using your key.") }
+                Section {
+                    Toggle("Save recording location", isOn: $store.locationEnabled)
+                    if let message = store.locationMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
+                } footer: { Text("Capture one location when a recording starts. Coordinates stay in your local note metadata and are not sent to Groq. No background location tracking.") }
                 Section("Storage") {
                     if let directory = store.library?.archive.directory {
                         Text("Library: \(directory.lastPathComponent)")
