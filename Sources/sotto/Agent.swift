@@ -158,7 +158,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         guard try Configuration.load(from: Paths.config) == session.configuration else {
             throw SottoError("Configuration was edited outside Sotto. Restart to load those changes before saving here.")
         }
-        if config.paste {
+        if config.paste && !session.configuration.paste {
             guard AXIsProcessTrusted() else { throw SottoError("Grant Sotto Accessibility access, then click Save again.") }
         }
         let replacement = try Session(configuration: config)

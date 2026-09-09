@@ -1,10 +1,11 @@
-Sotto v0.1.3 adds quiet, configurable update checks.
+Sotto v0.1.4 makes the recording indicator easier to learn and settings easier to change.
 
-- Checks at launch and daily by default. Turn automatic checks off in Settings; manual checks remain available.
-- Update availability appears inside the Sotto menu, with a link to the release page. No popups, notification badges, automatic downloads, or installer.
-- Only stable releases with a completed app upload are offered. Failures appear in the menu and native logs without interrupting dictation.
-- CI covers offline errors, retry, cancellation, duplicate requests, disabled checks, and version comparison.
+- README now shows the real recording/transcription indicator, an enlarged state guide, and a native Settings screenshot.
+- Clearer first-launch, recording, and manual-upgrade instructions; removed stale version and app-size claims.
+- Missing Accessibility permission no longer blocks saving unrelated settings, such as automatic update checks. Enabling auto-paste still checks permission, and recording still reports missing permission clearly.
 
-Download the universal ZIP below for Apple silicon and Intel Macs running macOS 14+. Existing settings, recordings, and your Groq key are preserved.
+Automatic update checks remain quiet: enabled at launch and daily, with update availability inside the Sotto menu. Installation is manual; there are no popup prompts or automatic downloads.
 
-**Personal-use build:** ad-hoc signed, not notarized by Apple. No Apple developer account is needed to use it. macOS may require Privacy & Security → Open Anyway on first launch and renewed permissions after replacing the app. The ZIP and SHA256SUMS appear after CI succeeds.
+Download the universal ZIP below for Apple silicon and Intel Macs running macOS 14+. Quit Sotto, replace the app in the same location, and reopen it. Existing settings, recordings, and your Groq key are preserved.
+
+**Personal-use build:** ad-hoc signed, not notarized by Apple. No Apple developer account is needed to use it. macOS may require Privacy & Security → Open Anyway and renewed permissions. The ZIP and SHA256SUMS appear after CI succeeds.

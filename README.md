@@ -10,44 +10,76 @@ Named after *sotto voce*, “in a quiet voice.” Pronounced **SOH-toh**.
 
 ## Get started
 
-Requires **macOS 14+** and a [Groq API key](https://console.groq.com/keys). **No Apple Developer account is needed for personal use.**
+**macOS 14+ · Apple silicon and Intel · Bring your own [Groq API key](https://console.groq.com/keys)**
 
-Download the universal app ZIP from the [latest release](https://github.com/ben-z/sotto/releases/latest). It runs on both Apple Silicon and Intel Macs. Extract it and move `Sotto.app` to Applications. No Xcode installation or GitHub sign-in is needed to download a public release; a SHA-256 checksum is attached alongside the ZIP.
+1. [Download the latest app](https://github.com/ben-z/sotto/releases/latest), extract the universal ZIP, and move **Sotto.app** to Applications.
+2. Open Sotto. In Settings, paste your Groq key and choose **Save & Check**. If you need a key, **Get a Groq API key** opens the creation page.
+3. Allow microphone access and Accessibility for auto-paste. You can turn auto-paste off and paste manually instead.
 
-Current releases are **ad-hoc signed, not notarized by Apple**. macOS may block the first launch: after attempting to open it, use **System Settings → Privacy & Security → Open Anyway** if you trust this download. Updates can require fresh microphone, Accessibility, or Keychain approval. See [Apple's instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
+Your key is stored in macOS Keychain. Audio goes directly to Groq using your account. No Sotto account, Xcode, or Apple Developer account is needed to use the app.
 
-Development builds are also available from successful [CI runs on main](https://github.com/ben-z/sotto/actions/workflows/ci.yml?query=branch%3Amain): choose **Sotto-app-ARM64** or **Sotto-app-X64** under Artifacts. Those artifacts require GitHub sign-in and contain a nested app ZIP.
+> **First launch:** current releases are ad-hoc signed, not Apple-notarized. If macOS blocks the app, attempt to open it, then use **System Settings → Privacy & Security → Open Anyway** if you trust the download. See [Apple’s instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
-To build from source instead, install **Xcode with Swift 6**:
+## Record a thought
 
-```sh
-git clone https://github.com/ben-z/sotto.git
-cd sotto
-scripts/build.sh
-scripts/launch.sh
-```
+Place the cursor where you want the text, **hold Control + Command + S**, speak, then release. Sotto transcribes in English by default and pastes into the active app. Keep that app in front while transcription finishes; if focus changes, your text stays on the clipboard for manual paste.
 
-On first launch, Sotto creates its configuration and opens Settings:
+The indicator is deliberately small: look at the **top center of the display where your pointer was when recording began**, just below the camera notch on Macs that have one. It does not take focus or intercept clicks.
 
-1. Paste your Groq key and click **Save & Check**, or use **Get a Groq API key**.
-2. Allow microphone access.
-3. Optionally enable auto-paste and grant Accessibility access.
+| State | What to look for |
+| --- | --- |
+| Preparing | A small amber light while the microphone starts. |
+| Recording | A continuous coral light. **REC** also appears beside the bird in the menu bar. |
+| Transcribing | Three blue segments. The microphone has stopped; wait for the text. |
+| Ready | The light disappears. The bird remains in the menu bar. |
 
-Your key stays in this device’s Keychain. Recordings go directly to Groq using your account.
+<img src="docs/images/indicator-guide.png" alt="Enlarged guide: amber dot for preparing, continuous coral line for recording, three blue segments for transcribing." width="760">
 
-## Use it
+<details>
+<summary>See the small indicator in context</summary>
 
-By default, **hold Control+Command+S** to record and release to transcribe, then paste into the active app. English is the default transcription language. Auto-paste requires Accessibility permission. You can choose toggle mode or disable auto-paste in Settings. The small display-edge light is coral while recording and blue while transcribing; the menu bar also shows **REC**.
+**Recording** — a crop of the top of the display:
 
-Settings lets you choose the language, Whisper model, recording folder, auto-paste, and whitespace trimming. Saved keys can be checked, replaced, or deleted. The menu shows the current recording state and lets you copy the last transcript again. Once permissions and a saved key are in place, launches stay quietly in the menu bar. To change the shortcut, click it in Settings, press your new combination, and choose **Save Changes**. Escape cancels shortcut entry. The change takes effect immediately. Editable settings show their defaults and mark overrides. The recording limit is editable in seconds (1–3,600); audio bitrate is shown as a read-only format detail. Reset one setting or use **Reset All to Defaults**, then **Save Changes** to apply. Resets preserve your API key and existing recordings. Under **Configuration file**, **Copy Configuration File Path** copies the JSON path and **Reveal Configuration File** selects it in Finder. Existing saved preferences are preserved when upgrading.
+<img src="docs/images/recording.png" alt="The actual recording indicator is a tiny coral line at the top center, above a demo note." width="760">
 
-Update checks are enabled by default: one GitHub request at launch and once daily while Sotto runs. The menu quietly shows availability and a link to the release download—no popups, notifications, automatic downloads, or installer. **Check for Updates** works manually even when automatic checks are off. Disable or reset **Updates** in Settings (`automaticUpdateChecks` in JSON). Failed checks appear in the menu and native logs; they do not interrupt dictation. Only stable releases with an uploaded app are offered. Checks send no recordings, transcripts, or Groq key.
+**Transcribing** — the same position, with three blue segments:
 
-Audio is transcribed after recording stops. There is no always-on microphone, local model, or background screen capture.
+<img src="docs/images/transcribing.png" alt="The actual transcription indicator is three small blue segments at the top center." width="760">
+
+These captures use Sotto’s real indicator over a demo background. The guide above enlarges the drawing 3×; the screen crops retain its proportions. No microphone audio was used to create them.
+
+</details>
+
+Click the bird to see the current state, stop or cancel a recording, copy the last transcript, or open your recordings. Cancelled audio is kept. Sotto transcribes after you stop recording; there is no always-on microphone, local model, or background screen capture.
+
+## Make it yours
+
+Open **Settings…** from the menu. Choose your language, Whisper model, recording folder, recording duration, toggle or hold mode, auto-paste, and whitespace trimming. To change the shortcut, click it and press a new combination; Escape cancels shortcut entry.
+
+Each editable setting shows its default and marks overrides. **Reset** changes one setting; **Reset All to Defaults** changes them all. Choose **Save Changes** to apply, or **Cancel** to discard. Resets keep your key and existing recordings. Command–W closes Settings; Escape leaves it open.
+
+<details>
+<summary>Settings screenshot</summary>
+
+<img src="docs/images/settings.png" alt="Native Sotto Settings showing English, hold-to-record, auto-paste, quiet update checks, and per-setting Reset buttons." width="580">
+
+Native development UI captured with example paths. See [how the images are generated](docs/images/README.md).
+
+</details>
+
+**Configuration file** has separate actions to copy the JSON file’s path and reveal it in Finder. **Status** guides permission setup and lets you check, replace, or delete your Groq key. Existing saved preferences are preserved when upgrading.
+
+## Quiet updates
+
+Sotto checks GitHub at launch and once daily while running. A newer version appears **inside the menu**, with **Download Sotto…** opening its release page. No popups, notification badges, automatic downloads, or installer.
+
+Turn off **Updates** in Settings to disable automatic checks. **Check for Updates** still works manually. Checks send no recordings, transcripts, or Groq key. Failed checks appear in the menu and native logs without interrupting dictation; releases are offered only after their app ZIP is uploaded.
+
+To install an update, finish your recording, quit Sotto, extract the new ZIP, and replace the app in the **same location**. Reopen it. Your key, configuration, and recordings live outside the app and are preserved. Ad-hoc signing means macOS may ask for microphone, Accessibility, or Keychain approval again. If auto-paste stops working, the Status tab explains how to refresh the Accessibility entry.
 
 ## Efficiency
 
-Native Swift with no third-party runtime dependencies or local model downloads. The current arm64 development app occupies **772 KiB on disk**, excluding retained recordings.
+Native Swift with no third-party runtime dependencies or local model downloads. The packaged app is small; current sizes and resource measurements are recorded in CI rather than a manually maintained size claim. Retained recordings are separate.
 
 [CI resource reports](https://github.com/ben-z/sotto/actions/workflows/ci.yml) are the regression source of truth: every push and pull request measures the optimized production core on Apple Silicon and Intel with fixed audio fixtures and a local HTTP server. Memory growth, peak footprint, and packaged app size have enforced limits; CPU and raw samples are reported too. This controlled test requires no credentials or microphone and does not measure the menu-bar UI or Groq inference. The [first verified CI baseline](docs/ci-performance-baseline.md) preserves measurements from both runners.
 
@@ -76,7 +108,14 @@ scripts/sotto quit
 
 ## Development
 
-Native Swift, no third-party dependencies. A shared `SottoCore` handles recording, transcription, Keychain storage, and files. The macOS interface uses AppKit.
+To build from source, install **Xcode with Swift 6**:
+
+```sh
+git clone https://github.com/ben-z/sotto.git
+cd sotto
+```
+
+A shared `SottoCore` handles recording, transcription, Keychain storage, and files. The macOS interface uses AppKit.
 
 ```sh
 swift test
@@ -88,6 +127,8 @@ scripts/launch.sh
 Development builds are ad-hoc signed, so rebuilding can require permission reapproval. Set `SOTTO_SIGNING_IDENTITY` to an existing signing identity for consistent signing across builds.
 
 An experimental iPhone/iPad app shares the core. Open `iOS/Sotto.xcodeproj` in Xcode; it requires iOS 17+ and still needs device testing.
+
+Successful [CI runs](https://github.com/ben-z/sotto/actions/workflows/ci.yml?query=branch%3Amain) also provide **Sotto-app-ARM64** and **Sotto-app-X64** development artifacts. These require GitHub sign-in; public release downloads do not.
 
 See [validation notes](VALIDATION.md) for measured results and limitations, and [icon sources](design/icon/README.md) for artwork.
 
