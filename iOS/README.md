@@ -4,9 +4,11 @@ An experimental native iPhone/iPad app for recording thoughts and turning them i
 
 Audio is saved locally before transcription. Add your Groq API key in Settings to process queued recordings. Notes remain usable without a key or connection: you can play audio, add a title, write text, and share the recording. Transcriptions run one at a time while the app is open. Offline work stays queued; rejected requests show an error and can be retried.
 
+Language selection in Settings and the transcription sheet includes the full [Whisper language list](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py), searchable by language name, native name, or API code. English is the default; **Detect automatically** leaves the language unspecified.
+
 ## Working with notes
 
-Tap a note’s title to rename it, or long-press a list row and choose **Rename**. Untitled notes use a short excerpt from the transcript automatically; this runs locally and makes no extra API request. Clearing a custom title restores the automatic title.
+Tap a note’s title to rename it, or long-press a list row and choose **Rename**. **Edit note** in the Note section edits only the body; title editing stays separate. Untitled notes use a short excerpt from the transcript automatically; this runs locally and makes no extra API request. Clearing a custom title restores the automatic title.
 
 Note details show the model used for the latest successful transcription. **Retranscribe** lets you choose a model and language for a new attempt. It replaces the machine transcript and raw response, while preserving your edited note text and custom title. Expand **Machine transcript** to read the new result separately from your edits.
 

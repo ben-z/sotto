@@ -179,6 +179,10 @@ struct NoteView: View {
                         else { Text(text).textSelection(.enabled); ShareLink("Share note", item: text) }
                     case .failure(let error): Text("Cannot read note: \(error.localizedDescription)").foregroundStyle(.red)
                     }
+                    Button("Edit note", systemImage: "square.and.pencil") {
+                        do { draft = try library.text(for: note); editing = true }
+                        catch { self.error = error.localizedDescription }
+                    }
                     if let message = note.error { Text(message).font(.caption).foregroundStyle(.red) }
                 }
                 Section("Transcription") {
@@ -202,12 +206,6 @@ struct NoteView: View {
                 if let error = error ?? store.error { Text(error).foregroundStyle(.red) }
             }
             .navigationTitle("Voice note").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                Button("Edit") {
-                    do { draft = try library.text(for: note); draftTitle = note.title ?? ""; editing = true }
-                    catch { self.error = error.localizedDescription }
-                }
-            }
             .onDisappear { store.stopPlayback() }
             .alert("Rename note", isPresented: $renaming) {
                 TextField("Title", text: $draftTitle)
@@ -223,20 +221,78 @@ struct NoteView: View {
             .sheet(isPresented: $editing) {
                 NavigationStack {
                     Form {
-                        TextField("Title", text: $draftTitle)
                         TextEditor(text: $draft).frame(minHeight: 250).accessibilityLabel("Note text")
                         if let error { Text(error).foregroundStyle(.red) }
                     }.navigationTitle("Edit note").navigationBarTitleDisplayMode(.inline)
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editing = false } }
                             ToolbarItem(placement: .confirmationAction) { Button("Save") {
-                                do { try library.saveText(draft, for: note); try library.rename(note, to: draftTitle); editing = false }
+                                do { try library.saveText(draft, for: note); editing = false }
                                 catch { self.error = error.localizedDescription }
                             } }
                         }
                 }
             }
         }
+    }
+}
+
+// Supported Whisper language tokens, including large-v3's Cantonese token.
+// https://github.com/openai/whisper/blob/main/whisper/tokenizer.py
+private struct NoteLanguage: Identifiable {
+    let id: String
+    var name: String { Locale.current.localizedString(forLanguageCode: id) ?? id }
+    var nativeName: String { Locale(identifier: id).localizedString(forLanguageCode: id) ?? name }
+    static let all: [NoteLanguage] = """
+    en zh de es ru ko fr ja pt tr pl ca nl ar sv it id hi fi vi he uk el ms cs ro da hu ta no
+    th ur hr bg lt la mi ml cy sk te fa lv bn sr az sl kn et mk br eu is hy ne mn bs kk sq sw
+    gl mr pa si km sn yo so af oc ka be tg sd gu am yi lo uz fo ht ps tk nn mt sa lb my bo tl
+    mg as tt haw ln ha ba jw su yue
+    """.split(whereSeparator: { $0.isWhitespace }).map { NoteLanguage(id: String($0)) }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+}
+
+private struct LanguagePicker: View {
+    @Binding var selection: String
+    var body: some View {
+        NavigationLink {
+            LanguageList(selection: $selection)
+        } label: {
+            LabeledContent("Language", value: selection.isEmpty ? "Detect automatically" : NoteLanguage(id: selection).name)
+        }.accessibilityIdentifier("language-picker")
+    }
+}
+
+private struct LanguageList: View {
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+    var body: some View {
+        List {
+            Section { option(code: "", name: "Detect automatically", detail: "Let Whisper identify the spoken language") }
+            Section {
+                ForEach(NoteLanguage.all.filter { search.isEmpty || $0.name.localizedStandardContains(search) || $0.nativeName.localizedStandardContains(search) || $0.id.localizedStandardContains(search) }) { language in
+                    option(code: language.id, name: language.name, detail: "\(language.nativeName) · \(language.id)")
+                }
+            }
+        }
+        .navigationTitle("Language").navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search name or code")
+    }
+    private func option(code: String, name: String, detail: String) -> some View {
+        Button {
+            selection = code; dismiss()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if selection == code { Image(systemName: "checkmark") }
+            }
+        }.accessibilityIdentifier("language-\(code.isEmpty ? "auto" : code)")
+            .accessibilityValue(selection == code ? "Selected" : "")
     }
 }
 
@@ -255,7 +311,7 @@ struct TranscribeSheet: View {
                     Text("whisper-large-v3-turbo").tag("whisper-large-v3-turbo")
                     Text("whisper-large-v3").tag("whisper-large-v3")
                 }
-                Picker("Language", selection: $language) { Text("English").tag("en"); Text("Detect automatically").tag("") }
+                LanguagePicker(selection: $language)
                 Text("Audio is sent to Groq using your key. A new transcript replaces the machine transcript; your edited note text and custom title are kept.").font(.callout).foregroundStyle(.secondary)
                 if !store.keyStored { Text("Add a Groq API key in Settings first.").foregroundStyle(.secondary) }
                 if let error { Text(error).foregroundStyle(.red) }
@@ -318,7 +374,7 @@ struct SettingsView: View {
                     }
                 }
                 Section {
-                    Picker("Language", selection: $language) { Text("English").tag("en"); Text("Detect automatically").tag("") }
+                    LanguagePicker(selection: $language)
                     Picker("Model", selection: $model) {
                         Text("whisper-large-v3-turbo").tag("whisper-large-v3-turbo")
                         Text("whisper-large-v3").tag("whisper-large-v3")

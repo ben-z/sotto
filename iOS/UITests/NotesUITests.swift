@@ -15,6 +15,32 @@ final class NotesUITests: XCTestCase {
         XCTAssertEqual(location.value as? String, "1", "Location capture must be enabled before testing it")
     }
 
+    func testLanguageSelectionPersists() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        app.buttons["language-picker"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("Japanese")
+        XCTAssertTrue(app.buttons["language-ja"].waitForExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Language search"; attachment.lifetime = .keepAlways; add(attachment)
+        app.buttons["language-ja"].tap()
+        app.terminate(); app.launch()
+        app.buttons["Settings"].tap()
+        app.buttons["language-picker"].tap()
+        search.tap(); search.typeText("ja")
+        XCTAssertEqual(app.buttons["language-ja"].value as? String, "Selected")
+        // Inspect the persisted API code, then restore the default through the same UI.
+        app.buttons["language-auto"].tap()
+        app.buttons["language-picker"].tap()
+        search.tap(); search.typeText("English")
+        app.buttons["language-en"].tap()
+        app.buttons["Done"].tap()
+    }
+
     func testLocationOptIn() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
@@ -104,9 +130,10 @@ final class NotesUITests: XCTestCase {
         XCTAssertTrue(fixture.waitForExistence(timeout: 10), "Run scripts/seed-ios-fixture.py before this test")
         fixture.tap()
         XCTAssertTrue(app.staticTexts["Original fixture transcript."].exists)
-        app.buttons["Edit"].tap()
+        app.buttons["Edit note"].tap()
         let editor = app.textViews["Note text"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["Title"].exists)
         editor.tap()
         editor.typeText(" Added locally.")
         app.buttons["Save"].tap()
@@ -190,10 +217,13 @@ final class NotesUITests: XCTestCase {
         let playback = app.buttons["Stop playback"]
         XCTAssertTrue(playback.waitForExistence(timeout: 5), "Saved audio must be playable")
         playback.tap()
-        app.buttons["Edit"].tap()
         let title = "Test note \(UUID().uuidString.prefix(8))"
-        app.textFields["Title"].tap()
-        app.textFields["Title"].typeText(title)
+        app.buttons["Rename note"].tap()
+        app.alerts.textFields["Title"].tap()
+        app.alerts.textFields["Title"].typeText(title)
+        app.alerts.buttons["Save"].tap()
+        app.buttons["Edit note"].tap()
+        XCTAssertFalse(app.textFields["Title"].exists)
         app.textViews["Note text"].tap()
         app.textViews["Note text"].typeText("An editable local note.")
         app.buttons["Save"].tap()
