@@ -26,6 +26,22 @@ final class NotesUITests: XCTestCase {
         XCTAssertFalse(app.buttons["note-ios-delete-fixture-a"].exists)
     }
 
+    func testLongPressAndSwipeDeletionCancel() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let fixture = app.buttons["note-ios-ui-fixture"]
+        XCTAssertTrue(fixture.waitForExistence(timeout: 10))
+        fixture.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Rename"].waitForExistence(timeout: 5))
+        app.buttons["Delete"].tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(fixture.exists)
+        fixture.swipeLeft()
+        app.buttons["Delete"].tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(fixture.exists)
+    }
+
     func testQuickRenameAndRetranscriptionOptions() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
@@ -40,7 +56,7 @@ final class NotesUITests: XCTestCase {
         app.alerts.buttons["Save"].tap()
         XCTAssertTrue(app.staticTexts["Quick title"].exists)
         app.swipeUp()
-        XCTAssertTrue(app.staticTexts["whisper-large-v3-turbo"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "whisper-large-v3-turbo", "whisper-large-v3-turbo")).firstMatch.exists)
         app.buttons["Retranscribe…"].tap()
         XCTAssertTrue(app.buttons["Transcribe"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()

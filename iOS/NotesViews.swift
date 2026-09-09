@@ -85,7 +85,7 @@ struct NotesView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(editMode.isEditing ? "Done" : "Select") {
                         editMode = editMode.isEditing ? .inactive : .active; selection.removeAll()
-                    }.disabled(library.notes.isEmpty || store.recording != nil || store.preparing)
+                    }.disabled(!editMode.isEditing && (library.notes.isEmpty || store.recording != nil || store.preparing))
                 }
                 ToolbarItem(placement: .topBarTrailing) { Button("Settings", systemImage: "gearshape") { settings = true } }
             }
