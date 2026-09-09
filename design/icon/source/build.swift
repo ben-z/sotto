@@ -142,50 +142,31 @@ for points in [16, 32, 128, 256, 512] {
 try json(["images": macImages, "info": info], "catalogs/macOS/Assets.xcassets/AppIcon.appiconset/Contents.json")
 try png(appIcon(1024, classic: true), "app/macos/Sotto-1024.png")
 
-// One fixed 26×18 pt canvas across states: no menu-bar reflow and no animation timer.
+// One centered 18×18 pt glyph. Recording feedback and state text live in the app.
 let states = ["Idle", "Recording", "Busy", "Error"]
-func status(_ c: CGContext, state: String, fill: CGColor = CGColor(gray: 0, alpha: 1)) {
-    bird(c, x: 0, y: 0.65, scale: 0.055, fill: fill, optical: true)
-    c.setFillColor(fill)
-    switch state {
-    case "Recording": c.fillEllipse(in: CGRect(x: 20, y: 3, width: 5, height: 5))
-    case "Busy":
-        for x: CGFloat in [20, 22.5, 25] { c.fillEllipse(in: CGRect(x: x - 0.75, y: 8.25, width: 1.5, height: 1.5)) }
-    case "Error":
-        c.addPath(CGPath(roundedRect: CGRect(x: 21.5, y: 3, width: 2, height: 7), cornerWidth: 1, cornerHeight: 1, transform: nil)); c.fillPath()
-        c.fillEllipse(in: CGRect(x: 21.25, y: 12, width: 2.5, height: 2.5))
-    default: break
-    }
+let glyphBounds = path(small["body"]!).boundingBoxOfPath.union(path(small["wing"]!).boundingBoxOfPath)
+let glyphScale: CGFloat = 0.055
+let glyphX = 9 - glyphBounds.midX * glyphScale
+let glyphY = 9 - glyphBounds.midY * glyphScale
+func status(_ c: CGContext, state _: String, fill: CGColor = CGColor(gray: 0, alpha: 1)) {
+    bird(c, x: glyphX, y: glyphY, scale: glyphScale, fill: fill, optical: true)
 }
-for state in states {
-    let name = "Sotto\(state)Template"
-    var images: [[String: Any]] = []
-    for scale in [1, 2, 3] {
-        let filename = "\(name)\(scale == 1 ? "" : "@\(scale)x").png"
-        let im = raster(26 * scale, 18 * scale) { c in c.scaleBy(x: CGFloat(scale), y: CGFloat(scale)); status(c, state: state) }
-        try png(im, "status/png/\(filename)")
-        if scale <= 2 {
-            try png(im, "catalogs/macOS/Assets.xcassets/\(name).imageset/\(filename)")
-            images.append(["filename": filename, "idiom": "mac", "scale": "\(scale)x"])
-        }
-    }
-    try pdf("status/pdf/\(name).pdf", w: 26, h: 18) { status($0, state: state) }
-    let badge: String
-    switch state {
-    case "Recording": badge = "<circle cx=\"22.5\" cy=\"5.5\" r=\"2.5\"/>"
-    case "Busy": badge = [20.0,22.5,25.0].map { "<circle cx=\"\($0)\" cy=\"9\" r=\"0.75\"/>" }.joined()
-    case "Error": badge = "<rect x=\"21.5\" y=\"3\" width=\"2\" height=\"7\" rx=\"1\"/><circle cx=\"22.5\" cy=\"13.25\" r=\"1.25\"/>"
-    default: badge = ""
-    }
-    let statusPaths = ["body", "wing"].map { "<path d=\"\(small[$0]!)\"/>" }.joined()
-    let statusSVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"26\" height=\"18\" viewBox=\"0 0 26 18\"><g fill=\"#000000\"><g transform=\"translate(0 0.65) scale(0.055)\">\(statusPaths)</g>\(badge)</g></svg>"
-    try write(statusSVG.data(using: .utf8)!, "status/svg/\(name).svg")
-    try json(["images": images, "info": info, "properties": ["template-rendering-intent": "template"]], "catalogs/macOS/Assets.xcassets/\(name).imageset/Contents.json")
-}
+let glyphName = "SottoGlyphTemplate"
+var glyphImages: [[String: Any]] = []
 for scale in [1, 2, 3] {
-    try png(raster(18 * scale, 18 * scale) { c in c.scaleBy(x: CGFloat(scale), y: CGFloat(scale)); bird(c, x: 0, y: 0.65, scale: 0.055, fill: black, optical: true) }, "status/png/SottoGlyphTemplate\(scale == 1 ? "" : "@\(scale)x").png")
+    let filename = "\(glyphName)\(scale == 1 ? "" : "@\(scale)x").png"
+    let im = raster(18 * scale, 18 * scale) { c in c.scaleBy(x: CGFloat(scale), y: CGFloat(scale)); status(c, state: "") }
+    try png(im, "status/png/\(filename)")
+    if scale <= 2 {
+        try png(im, "catalogs/macOS/Assets.xcassets/\(glyphName).imageset/\(filename)")
+        glyphImages.append(["filename": filename, "idiom": "mac", "scale": "\(scale)x"])
+    }
 }
-try pdf("status/pdf/SottoGlyphTemplate.pdf", w: 18, h: 18) { bird($0, x: 0, y: 0.65, scale: 0.055, fill: black, optical: true) }
+try pdf("status/pdf/\(glyphName).pdf", w: 18, h: 18) { status($0, state: "") }
+let statusPaths = ["body", "wing"].map { "<path d=\"\(small[$0]!)\"/>" }.joined()
+let statusSVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 18 18\"><g fill=\"#000000\" transform=\"translate(\(glyphX) \(glyphY)) scale(\(glyphScale))\">\(statusPaths)</g></svg>"
+try write(statusSVG.data(using: .utf8)!, "status/svg/\(glyphName).svg")
+try json(["images": glyphImages, "info": info, "properties": ["template-rendering-intent": "template"]], "catalogs/macOS/Assets.xcassets/\(glyphName).imageset/Contents.json")
 
 // Visual contact sheet uses the actual raster exports, never AI-rendered approximations.
 func text(_ c: CGContext, _ s: String, _ x: CGFloat, _ y: CGFloat, size: CGFloat = 16, hex: String = "#242426", bold: Bool = false) {
@@ -218,22 +199,22 @@ func proof(_ c: CGContext) {
         image(c, appIcon(n, classic: true), CGRect(x: x, y: 670, width: CGFloat(n), height: CGFloat(n)), nearest: true)
         text(c, "\(n)", x, 808, size: 13); x += CGFloat(n + 36)
     }
-    text(c, "Menu-bar states · black/clear templates", 674, 613, size: 20, bold: true)
+    text(c, "Menu bar · one centered glyph for every state", 674, 613, size: 20, bold: true)
     for (row, dark) in [false, true].enumerated() {
         let y = CGFloat(670 + row * 76)
         c.setFillColor(color(dark ? "#242426" : "#FFFFFF")); c.fill(CGRect(x: 674, y: y, width: 686, height: 56))
         for (i, state) in states.enumerated() {
             let x = CGFloat(702 + i * 163)
-            let im = raster(26, 18) { status($0, state: state, fill: dark ? white : black) }
-            image(c, im, CGRect(x: x, y: y + 18, width: 26, height: 18), nearest: true)
+            let im = raster(18, 18) { status($0, state: state, fill: dark ? white : black) }
+            image(c, im, CGRect(x: x, y: y + 18, width: 18, height: 18), nearest: true)
             text(c, state, x + 36, y + 18, size: 12, hex: dark ? "#FFFFFF" : "#242426")
         }
     }
     text(c, "Small-size geometry · 8× pixel inspection", 64, 888, size: 20, bold: true)
     for (i, state) in states.enumerated() {
         let x = CGFloat(64 + i * 337)
-        let im = raster(26, 18) { status($0, state: state) }
-        image(c, im, CGRect(x: x, y: 946, width: 208, height: 144), nearest: true)
+        let im = raster(18, 18) { status($0, state: state) }
+        image(c, im, CGRect(x: x, y: 946, width: 144, height: 144), nearest: true)
         text(c, state, x, 1110, size: 17, bold: true)
     }
     text(c, "Right-facing · sRGB · vector masters · optical small-size variant · no runtime animation", 64, 1200, size: 16)

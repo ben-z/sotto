@@ -1,6 +1,5 @@
 import AppKit
 import ImageIO
-import CryptoKit
 
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let fm = FileManager.default
@@ -51,27 +50,21 @@ let mp = pixels(mac)
 require(mp[3] == 0 && mp[(1024 * 512 + 512) * 4 + 3] == 255, "classic macOS transparent corners, opaque center")
 for scale in [1, 2, 3] {
     let suffix = scale == 1 ? "" : "@\(scale)x"
-    let idle = load("status/png/SottoIdleTemplate\(suffix).png")
-    let ip = pixels(idle)
-    var hashes: Set<String> = []
-    for state in ["Idle", "Recording", "Busy", "Error"] {
-        let im = load("status/png/Sotto\(state)Template\(suffix).png")
-        require(im.width == 26 * scale && im.height == 18 * scale, "status geometry")
-        let p = pixels(im)
-        require(stride(from: 0, to: p.count, by: 4).allSatisfy { p[$0] == 0 && p[$0+1] == 0 && p[$0+2] == 0 }, "template RGB must be black")
-        require(stride(from: 3, to: p.count, by: 4).contains { p[$0] == 0 }, "template must contain transparent background")
-        require(stride(from: 3, to: p.count, by: 4).contains { p[$0] == 255 }, "template must contain opaque foreground")
-        var stable = true
-        for y in 0..<im.height {
-            for x in 0..<(18 * scale) {
-                let index = (y * im.width + x) * 4 + 3
-                if p[index] != ip[index] { stable = false }
-            }
+    let im = load("status/png/SottoGlyphTemplate\(suffix).png")
+    require(im.width == 18 * scale && im.height == 18 * scale, "compact status geometry")
+    let p = pixels(im)
+    require(stride(from: 0, to: p.count, by: 4).allSatisfy { p[$0] == 0 && p[$0+1] == 0 && p[$0+2] == 0 }, "template RGB must be black")
+    require(stride(from: 3, to: p.count, by: 4).contains { p[$0] == 255 }, "template must have solid foreground")
+    var xs: [Int] = [], ys: [Int] = []
+    for y in 0..<im.height {
+        for x in 0..<im.width where p[(y * im.width + x) * 4 + 3] > 16 {
+            xs.append(x); ys.append(y)
         }
-        require(stable, "bird shifts between states")
-        hashes.insert(SHA256.hash(data: Data(p)).map { String(format: "%02x", $0) }.joined())
     }
-    require(hashes.count == 4, "status states must be visually distinct")
+    require(!xs.isEmpty, "glyph is empty")
+    require(xs.min()! > 0 && xs.max()! < im.width - 1 && ys.min()! > 0 && ys.max()! < im.height - 1, "glyph must have unclipped transparent margins")
+    require(abs(xs.min()! - (im.width - 1 - xs.max()!)) <= 1, "glyph horizontal margins differ by more than one raster pixel")
+    require(abs(ys.min()! - (im.height - 1 - ys.max()!)) <= 1, "glyph vertical margins differ by more than one raster pixel")
 }
 for platform in ["iOS", "macOS"] {
     let catalog = root.appendingPathComponent("catalogs/\(platform)/Assets.xcassets")
@@ -82,7 +75,7 @@ for platform in ["iOS", "macOS"] {
             require(fm.fileExists(atPath: url.deletingLastPathComponent().appendingPathComponent(filename).path), "missing catalog file \(filename)")
             if platform == "macOS" {
                 let scale = Int((item["scale"] as! String).dropLast())!
-                let size = item["size"] as? String ?? "26x18"
+                let size = item["size"] as? String ?? "18x18"
                 let dimensions = size.split(separator: "x").map { Int($0)! * scale }
                 let im = load(String(url.deletingLastPathComponent().appendingPathComponent(filename).path.dropFirst(root.path.count + 1)))
                 require(im.width == dimensions[0] && im.height == dimensions[1], "catalog slot dimensions")
@@ -93,7 +86,7 @@ for platform in ["iOS", "macOS"] {
 let icns = try Data(contentsOf: root.appendingPathComponent("app/macos/Sotto.icns"))
 require(String(data: icns.prefix(4), encoding: .ascii) == "icns", "ICNS header")
 require(NSImage(data: icns) != nil, "AppKit ICNS decoding")
-let summary: [String: Any] = ["checks": checks, "pngFilesDecoded": fileCount, "result": "passed", "validated": ["sRGB profiles", "PNG decoding", "iOS dimensions and no alpha", "grayscale tint", "classic macOS alpha", "template black/clear pixels", "stable state geometry", "distinct states", "asset catalog references and sizes", "AppKit ICNS decoding"]]
+let summary: [String: Any] = ["checks": checks, "pngFilesDecoded": fileCount, "result": "passed", "validated": ["sRGB profiles", "PNG decoding", "iOS dimensions and no alpha", "grayscale tint", "classic macOS alpha", "template black/clear pixels", "centered compact glyph and unclipped margins", "asset catalog references and sizes", "AppKit ICNS decoding"]]
 try fm.createDirectory(at: root.appendingPathComponent("validation"), withIntermediateDirectories: true)
 try JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("validation/pixel-checks.json"))
 print("PASS: \(checks) checks; \(fileCount) PNG files decoded")

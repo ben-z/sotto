@@ -12,10 +12,10 @@ The approved identity is the right-facing paper songbird in terracotta **#E9957D
 | `masters/` | Editable SVG logos and full-bleed app compositions |
 | `composer-layers/` | Aligned SVG layers, including the recommended combined silhouette |
 | `Sotto.icon/` | Native Icon Composer document for current Apple platforms |
-| `status/svg/` | Editable status glyphs with idle, recording, busy, and error states |
-| `integration/SottoStatusArtwork.swift` | AppKit loading helper, not yet wired into the executable |
+| `status/svg/` | Centered 18×18 pt status glyph |
+| `integration/SottoStatusArtwork.swift` | AppKit loading helper; keep the live helper in sync when changing artwork |
 | Root `Resources/Sotto.icns` | Classic macOS app icon |
-| Root `Resources/SottoStatus/` | Eight shipping status PNGs, 1× and 2× |
+| Root `Resources/SottoStatus/` | Two shipping status PNGs, 1× and 2× |
 | Root `iOS/Assets.xcassets/` | Default, dark, and tinted 1024px app-icon sources |
 
 Generated files required by the app are committed alongside the editable sources. Update both in the same commit. ZIP releases, compiler products, and exploratory renders are not tracked. No Git LFS or third-party rendering dependency is required.
@@ -40,14 +40,14 @@ Edit `source/geometry.json` for shapes/colors and `source/composer.json` for nat
 - Classic macOS `.icns` includes all ten standard slots from 16px through 1024px, with an inset rounded tile and transparent exterior.
 - iOS inputs are full-bleed 1024×1024 sRGB PNGs without alpha channels. The tinted source is grayscale. The system applies masking.
 - The native `.icon` uses an unmasked background and combined foreground, with foreground translucency and extra shadows disabled. Native tint and clear appearances remain system-controlled.
-- Every status state uses a 26×18 pt canvas with the bird at the same position. A dot denotes recording, ellipsis denotes pending work, and an exclamation mark denotes error. Preparing and transcribing share the pending image but have distinct accessible descriptions.
+- All states use one centered, unbadged 18×18 pt bird. Its actual path bounds are centered in both axes; no space is reserved for badges. Existing REC text, the recording indicator, and textual menu/error feedback communicate state. Accessible descriptions still distinguish every session state.
 - Status PNGs are strictly black and transparent. The helper sets `isTemplate = true`, caches 1×/2× representations, and updates accessible descriptions without a timer. It throws if required assets are missing.
 
 ## Integration status
 
-This commit versions artwork only. The current `scripts/build.sh`, macOS status item, and iOS project have not been changed to consume these files.
+The macOS build uses the classic `.icns` route. When changing the status artwork, keep the live helper in `Sources/sotto/SottoStatusArtwork.swift` synchronized with the example here and copy the matching resources before signing. The iOS catalog still needs target integration.
 
-For the lightweight macOS route, copy `Resources/Sotto.icns` and `Resources/SottoStatus` into the built bundle's `Contents/Resources` before signing, add `CFBundleIconFile = Sotto.icns` to the generated plist, and use the included status helper in the state-change handler. Keep the existing recording indicator and textual menu status; the tiny status dot should not be the only recording feedback.
+For the lightweight macOS route, copy `Resources/Sotto.icns` and `Resources/SottoStatus` into the built bundle's `Contents/Resources` before signing, add `CFBundleIconFile = Sotto.icns` to the generated plist, and use the included status helper in the state-change handler. Keep the existing REC text, recording indicator, and textual menu status. Remove obsolete state-badge resources from the built bundle when migrating to the compact glyph.
 
 For iOS, add `iOS/Assets.xcassets` to the target's resources and set `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`. Alternatively, add `Sotto.icon` and set the icon source to `Sotto`. Choose one icon-source route per target.
 

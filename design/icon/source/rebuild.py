@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='sotto-artwork-') as folder:
     subprocess.run(['swiftc', '-typecheck', str(DESIGN / 'integration/SottoStatusArtwork.swift')], check=True)
     pairs = [(work / 'app/macos/Sotto.icns', REPO / 'Resources/Sotto.icns')]
     for p in (work / 'status/png').glob('*.png'):
-        if 'Glyph' not in p.name and '@3x' not in p.name:
+        if '@3x' not in p.name:
             pairs.append((p, REPO / 'Resources/SottoStatus' / p.name))
     for folder in ['masters', 'composer-layers', 'status/svg', 'Sotto.icon']:
         for p in (work / folder).rglob('*'):
