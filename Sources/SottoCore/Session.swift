@@ -33,7 +33,7 @@ public final class Session: ObservableObject {
 
     public func fail(_ error: Error) { change(.error, error.localizedDescription) }
 
-    public func begin(contextTerms: [String] = []) async {
+    public func begin() async {
         guard state == .idle || state == .error else { return }
         stopWhilePreparing = false
         record = nil
@@ -42,9 +42,7 @@ public final class Session: ObservableObject {
             _ = try GroqKeychain.read() // Fail before recording when credentials are missing.
             guard await Recorder.requestPermission() else { throw SottoError("Microphone permission denied. Enable Sotto in System Settings > Privacy & Security > Microphone.") }
             guard !stopWhilePreparing else { change(.idle, "Cancelled before recording"); return }
-            let history = try archive.recentContext(limit: configuration.contextHistoryCount)
-            let prompt = Prompt.build(contextTerms: contextTerms + history)
-            let newRecord = try archive.newRecord(model: configuration.model, language: configuration.language, prompt: prompt, contextTerms: contextTerms)
+            let newRecord = try archive.newRecord(model: configuration.model, language: configuration.language, prompt: "", contextTerms: [])
             record = newRecord
             try recorder.start(at: archive.audioURL(newRecord), bitRate: configuration.audioBitRate)
             change(.recording, "Recording · \(newRecord.id)")

@@ -59,12 +59,4 @@ public struct Archive: Sendable {
         try save(record)
     }
 
-    public func recentContext(limit: Int) throws -> [String] {
-        guard limit > 0 else { return [] }
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" && !$0.lastPathComponent.hasSuffix(".response.json") }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }.prefix(limit)
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        return try files.flatMap { try decoder.decode(RecordingRecord.self, from: Data(contentsOf: $0)).contextTerms }
-    }
 }

@@ -15,15 +15,13 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
     private let mode = NSPopUpButton()
     private let paste = NSButton(checkboxWithTitle: "Paste into the active app", target: nil, action: nil)
     private let trim = NSButton(checkboxWithTitle: "Trim surrounding whitespace", target: nil, action: nil)
-    private let context = NSButton(checkboxWithTitle: "Use focused text for technical vocabulary", target: nil, action: nil)
-    private let history = NSPopUpButton()
     private let folder = NSTextField(labelWithString: "")
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
 
     init(configuration: Configuration, configurationURL: URL, onSave: @escaping (Configuration) throws -> Void, onClose: @escaping () -> Void) {
         original = configuration; saveConfiguration = onSave; didClose = onClose
         self.configurationURL = configurationURL
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 700),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Sotto Settings"
         window.isReleasedWhenClosed = false
@@ -48,11 +46,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         select(mode, configuration.hotkeyMode)
         paste.state = configuration.paste ? .on : .off
         trim.state = configuration.trimWhitespace ? .on : .off
-        context.state = configuration.captureFocusedContext ? .on : .off
-        for control in [paste, context] { control.target = self; control.action = #selector(optionsChanged) }
+        paste.target = self; paste.action = #selector(optionsChanged)
         model.target = self; model.action = #selector(optionsChanged)
-        for count in 0...10 { addChoice(history, count == 0 ? "Off" : "Last \(count) recording\(count == 1 ? "" : "s")", String(count)) }
-        select(history, String(configuration.contextHistoryCount))
         folder.stringValue = configuration.recordingsDirectory
         folder.lineBreakMode = .byTruncatingMiddle
         folder.toolTip = configuration.recordingsDirectory
@@ -67,7 +62,6 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
             [label("Shortcut mode"), mode], [label("Recordings"), folderRow],
             [label("Output"), paste],
             [label("Text"), trim],
-            [label("Context"), context], [label("Context history"), history]
         ])
         grid.rowSpacing = 8; grid.columnSpacing = 16
         grid.column(at: 0).xPlacement = .trailing
@@ -97,7 +91,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         general.addSubview(stack)
         diagnostics = DiagnosticsView(model: { [weak self] in
             guard let self else { return configuration.model }; return self.value(self.model)
-        }, needsAccessibility: { [weak self] in self?.paste.state == .on || self?.context.state == .on })
+        }, needsAccessibility: { [weak self] in self?.paste.state == .on })
         let settingsTab = NSTabViewItem(identifier: "settings"); settingsTab.label = "Settings"; settingsTab.view = general
         let statusTab = NSTabViewItem(identifier: "status"); statusTab.label = "Status"; statusTab.view = diagnostics
         tabs.addTabViewItem(settingsTab); tabs.addTabViewItem(statusTab)
@@ -173,8 +167,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         config.model = value(model); config.hotkeyMode = value(mode)
         config.recordingsDirectory = folder.stringValue
         config.trimWhitespace = trim.state == .on
-        config.paste = paste.state == .on; config.captureFocusedContext = context.state == .on
-        config.contextHistoryCount = Int(value(history))!
+        config.paste = paste.state == .on
         do { try saveConfiguration(config); close() }
         catch { errorLabel.stringValue = error.localizedDescription }
     }

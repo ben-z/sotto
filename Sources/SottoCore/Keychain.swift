@@ -42,6 +42,13 @@ public enum GroqKeychain {
         return key
     }
 
+    public static func delete() throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw SottoError("Cannot delete key from Keychain (OSStatus \(status)).")
+        }
+    }
+
     public static func save(_ value: String) throws {
         let key = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty, !key.contains(where: { $0.isWhitespace }) else { throw SottoError("API key is empty or contains whitespace.") }

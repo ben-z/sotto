@@ -15,8 +15,6 @@ Requires macOS 14+, Xcode/Swift 6, internet access, a Groq API key, and micropho
 ```sh
 cd ~/Projects/sotto
 scripts/build.sh
-scripts/sotto init                         # or: init /absolute/audio/destination
-scripts/sotto key set                      # hidden input, stored in Keychain
 scripts/launch.sh
 ```
 
@@ -35,17 +33,19 @@ log stream --predicate 'subsystem == "dev.sotto.app"' --level info
 
 Hotkeys do not require a full GUI. A command-line program with an event loop can register them. We package this executable as a small `.app` so macOS can associate permissions with it; a status icon also makes accidental recording easier to notice. CLI commands and the app are the same executable.
 
-Startup validates configuration and the recording destination, then opens Status to show live setup checks. If auto-paste/context requires missing Accessibility access, attempting to record shows an error and opens Settings; recording is blocked until resolved. `scripts/sotto doctor` checks local prerequisites from the CLI. It does not validate the key with Groq; a transcription performs that check. No requests are retried automatically. Bad credentials, rate limits, invalid destinations, and missing permissions are surfaced explicitly.
+Startup validates configuration and the recording destination, then opens Status to show live setup checks. If auto-paste requires missing Accessibility access, attempting to record shows an error and opens Settings; recording is blocked until resolved. `scripts/sotto doctor` checks local prerequisites from the CLI. It does not validate the key with Groq; a transcription performs that check. No requests are retried automatically. Bad credentials, rate limits, invalid destinations, and missing permissions are surfaced explicitly.
 
 ### Configure
 
-Use **Settings…** in the Sotto menu for a lightweight native window: language, Whisper model, hold/toggle mode, recording folder, auto-paste, and focused-context options. **Save** validates and applies these options immediately, without restarting. Changing folders affects new recordings only. The window is created on demand and released when closed; it does not launch an external editor. Missing Accessibility permission is shown inline before saving. Settings cannot be saved during a recording/upload, or over configuration changes made externally since the app started.
+First launch creates a default config automatically; existing or invalid configs are never replaced. In Status, paste an existing key and choose **Save & Check**, or use **Get a Groq API key** to open Groq’s key creation page. The key is saved in Keychain and checked immediately. A rejected key or network error stays visible; saving a key is not presented as successful verification. No terminal setup is required.
 
-The **Status** tab shows Keychain storage, an explicit **Check Connection** action, and microphone/Accessibility authorization. The API key lives in macOS Keychain under service `Sotto.Groq`, account `api-key`; its value is not displayed. **Set / Replace Key…** securely updates it. Opening Settings checks only Keychain metadata without requesting secret access. Checking the connection or recording may ask for Keychain authorization after a development rebuild.
+Use **Settings…** in the Sotto menu for a lightweight native window: language, Whisper model, hold/toggle mode, recording folder, auto-paste, and whitespace trimming. **Save** validates and applies these options immediately, without restarting. Changing folders affects new recordings only. The window is created on demand and released when closed; it does not launch an external editor. Missing Accessibility permission is shown inline before saving. Settings cannot be saved during a recording/upload, or over configuration changes made externally since the app started.
+
+The **Status** tab shows Keychain storage, an explicit **Check Connection** action, and microphone/Accessibility authorization. The API key lives in macOS Keychain under service `Sotto.Groq`, account `api-key`; its value is not displayed. **Save & Check** securely updates it and checks the connection. The secure entry field is cleared after saving or closing the window. Opening Settings checks only Keychain metadata without requesting secret access. Checking the connection or recording may ask for Keychain authorization after a development rebuild.
 
 **Check Connection** makes one authenticated `GET /openai/v1/models` request to Groq and checks that the selected Whisper model is listed. The result is timestamped and lasts for this window session. This validates authentication/model listing, not inference quota or end-to-end transcription. Rejection, access denial, rate limiting, network failure, and malformed responses are not reported as success. The CLI equivalent is `scripts/sotto key check`.
 
-Permission statuses refresh when the settings window becomes active, when relevant options change, or when **Refresh Status** is clicked. No timer or background API polling is used. Accessibility is marked required only when auto-paste or focused context is selected. Microphone access is always required to record; the request button asks for permission without recording. Links open the appropriate System Settings pane. **Copy Config Path** copies the absolute raw JSON path; **Show in Finder** reveals the file without opening Xcode or another editor.
+Permission statuses refresh when the settings window becomes active, when relevant options change, or when **Refresh Status** is clicked. No timer or background API polling is used. Accessibility is marked required only when auto-paste is selected. Microphone access is always required to record; the request button asks for permission without recording. Links open the appropriate System Settings pane. **Copy Config Path** copies the absolute raw JSON path; **Show in Finder** reveals the file without opening Xcode or another editor.
 
 `scripts/sotto config` prints the JSON path, normally `~/Library/Application Support/Sotto/config.json`. Edit it, quit, and relaunch. `init` refuses to overwrite existing configuration. Example:
 
@@ -54,8 +54,6 @@ Permission statuses refresh when the settings window becomes active, when releva
   "recordingsDirectory": "~/Documents/Sotto",
   "model": "whisper-large-v3-turbo",
   "language": "en",
-  "captureFocusedContext": false,
-  "contextHistoryCount": 0,
   "paste": false,
   "hotkeyKeyCode": 49,
   "hotkeyModifiers": 6144,
@@ -88,15 +86,9 @@ There is no waveform animation, always-on microphone, local model, database, cac
 
 The default maximum recording duration is 30 minutes; it stops and transcribes at the limit. The client rejects empty audio or files >=25,000,000 bytes and keeps the original. It uses a request timeout of 120 seconds and total resource timeout of 180 seconds. Only one recording/transcription runs at a time.
 
-### Jargon and focused context
+### Transcription context
 
-Vocabulary files are not supported. Context is off by default; try plain transcription first. Optional `captureFocusedContext=true` reads the foreground app/window and its selected or focused text **only at hotkey press** via macOS Accessibility. It extracts a small list of acronym/CamelCase/code-like terms; no full text or screenshots are archived by this feature. A secure text field is refused. Unsupported Accessibility text is an explicit error, not an invisible fallback.
-
-`contextHistoryCount` (0–10) adds terms from that many recent Sotto recording sidecars. This is history of Sotto's own context captures, not a complete history of your screen or other apps. It scans sidecar filenames on demand, so very large archive directories may add latency when history is enabled. Current context has priority over history. The actual prompt is saved for debugging. Those terms are sent to Groq with your audio when enabled.
-
-Groq documents a 224-token Whisper prompt limit. Sotto uses a conservative 200 UTF-8 byte budget, deduplicates terms, and drops whole terms that do not fit; it does not ship a tokenizer or a second model. This is pronunciation/spelling context, not a chat instruction or automatic rewrite. [Groq prompting documentation](https://console.groq.com/docs/speech-to-text).
-
-Full-screen OCR and continuous screen history are deliberately not implemented. A future manual/context-at-recording OCR step can feed the same term list if Accessibility coverage proves insufficient. Keep it opt-in and bounded; do not introduce an indexing daemon just for jargon.
+Sotto uses plain transcription with the selected language and model. Vocabulary files, focused-text capture, and context history are not implemented. Existing recordings and their diagnostics remain intact.
 
 ### Streaming
 
@@ -125,3 +117,5 @@ xcodebuild -project iOS/Sotto.xcodeproj -scheme Sotto -configuration Release \
 See `VALIDATION.md` for measured results and remaining checks. Build artifacts live under `.build/`; they are not the installed app footprint.
 
 `trimWhitespace` defaults to `true`, including in existing configs that omit it. Settings → Text → **Trim surrounding whitespace** removes leading/trailing whitespace from saved transcripts, clipboard/paste output, and CLI output. Internal spacing and the archived raw Groq response are unchanged. Set it to `false` to keep the returned text verbatim.
+
+**Delete Key…** removes only Sotto’s saved credential from this device’s Keychain after confirmation. It clears the connection result and returns to key entry. It does not revoke the key at Groq or remove recordings.

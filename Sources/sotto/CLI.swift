@@ -43,7 +43,7 @@ struct CLI {
                 let config = try Configuration.load(from: Paths.config)
                 _ = try Archive(directory: config.recordingsURL)
                 _ = try GroqKeychain.read()
-                if config.paste || config.captureFocusedContext, !AXIsProcessTrusted() { throw SottoError("Accessibility permission required by configuration is missing.") }
+                if config.paste, !AXIsProcessTrusted() { throw SottoError("Accessibility permission required by configuration is missing.") }
                 print("Configuration, archive destination, and Keychain OK. Microphone is requested on first recording. No API request was made.")
             case "status":
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.sotto.app")
@@ -78,7 +78,8 @@ struct CLI {
                 }
             case "run":
                 guard args.count <= 1 else { throw SottoError("Usage: sotto run") }
-                let config = try Configuration.load(from: Paths.config)
+                let defaultDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Sotto").path
+                let config = try Configuration.loadOrCreate(from: Paths.config, recordingsDirectory: defaultDirectory)
                 let app = NSApplication.shared
                 app.setActivationPolicy(.accessory)
                 let agent = try Agent(configuration: config)

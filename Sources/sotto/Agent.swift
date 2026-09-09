@@ -68,12 +68,11 @@ final class Agent: NSObject, NSApplicationDelegate {
         if session.state == .recording || session.state == .preparing { Task { await session.finish() }; return }
         guard session.state != .transcribing else { NSSound.beep(); return }
         do {
-            if session.configuration.paste || session.configuration.captureFocusedContext {
-                guard AXIsProcessTrusted() else { throw SottoError("Recording blocked: auto-paste or focused context is enabled but Accessibility access is missing. Grant access in Status, or turn these options off in Settings. The shortcut itself does not need Accessibility.") }
+            if session.configuration.paste {
+                guard AXIsProcessTrusted() else { throw SottoError("Recording blocked: auto-paste is enabled but Accessibility access is missing. Grant access in Status, or turn auto-paste off in Settings. The shortcut itself does not need Accessibility.") }
             }
             pasteTarget = NSWorkspace.shared.frontmostApplication
-            let terms = session.configuration.captureFocusedContext ? try FocusedContext.terms() : []
-            Task { await session.begin(contextTerms: terms) }
+            Task { await session.begin() }
         } catch { session.fail(error) }
     }
 
@@ -95,7 +94,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         guard try Configuration.load(from: Paths.config) == session.configuration else {
             throw SottoError("Configuration was edited outside Sotto. Restart to load those changes before saving here.")
         }
-        if config.paste || config.captureFocusedContext {
+        if config.paste {
             guard AXIsProcessTrusted() else { throw SottoError("Grant Sotto Accessibility access, then click Save again.") }
         }
         let replacement = try Session(configuration: config)

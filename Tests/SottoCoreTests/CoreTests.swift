@@ -2,19 +2,6 @@ import Foundation
 import Testing
 @testable import SottoCore
 
-@Test func promptBudgetAndPriority() {
-    let prompt = Prompt.build(contextTerms: ["Kubernetes", "Groq", "CUDA", "groq", "AVFoundation", String(repeating: "X", count: 500)])
-    #expect(prompt == "Kubernetes, Groq, CUDA, AVFoundation")
-    #expect(prompt.utf8.count <= 200)
-    let unicode = Prompt.build(contextTerms: Array(repeating: "技术词汇", count: 90))
-    #expect(unicode.utf8.count <= 200)
-}
-
-@Test func contextIsBoundedAndDeduplicated() {
-    let terms = Prompt.technicalTerms(from: "Use AVFoundation with CUDA and C++ and snake_case. CUDA is fast. Ordinary prose.")
-    #expect(terms == ["AVFoundation", "CUDA", "C++", "snake_case"])
-}
-
 @Test func configurationRejectsBrokenPrerequisites() throws {
     var config = Configuration(recordingsDirectory: "relative/path")
     #expect(throws: SottoError.self) { try config.validate() }
@@ -22,7 +9,7 @@ import Testing
     config.model = "distil-whisper-large-v3-en"
     #expect(throws: SottoError.self) { try config.validate() }
     config.model = "whisper-large-v3-turbo"
-    config.contextHistoryCount = 100
+    config.audioBitRate = 1
     #expect(throws: SottoError.self) { try config.validate() }
 }
 
@@ -36,7 +23,6 @@ import Testing
     record.status = "failed"; record.error = "HTTP 429"
     try archive.save(record)
     #expect(try Data(contentsOf: archive.audioURL(record)) == audio)
-    #expect(try archive.recentContext(limit: 1) == ["CUDA"])
     let json = try String(contentsOf: temp.appendingPathComponent("\(record.id).json"), encoding: .utf8)
     #expect(json.contains("HTTP 429"))
 }
@@ -53,14 +39,6 @@ import Testing
     #expect(encoded.range(of: bytes) != nil)
     #expect(encoded.suffix(12) == Data("\r\n--TEST--\r\n".utf8))
     #expect(String(decoding: encoded.prefix(300), as: UTF8.self).contains("name=\"prompt\"\r\n\r\nCUDA"))
-}
-
-@Test func malformedHistoryIsNotSilentlyIgnored() throws {
-    let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: temp) }
-    let archive = try Archive(directory: temp)
-    try Data("broken".utf8).write(to: temp.appendingPathComponent("2026-broken.json"))
-    #expect(throws: (any Error).self) { try archive.recentContext(limit: 1) }
 }
 
 @Test func keyCheckDistinguishesRejectedKeyFromServiceProblems() {
@@ -132,4 +110,20 @@ import Testing
     let result = TranscriptionResult(text: "Hello", rawResponse: Data(), milliseconds: 1, requestID: nil)
     #expect(throws: (any Error).self) { try archive.complete(&record, with: result) }
     #expect(record.status == "transcribing")
+}
+
+@Test func firstLaunchCreatesConfigAndPreservesExistingSettings() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("support/config.json")
+    var config = try Configuration.loadOrCreate(from: url, recordingsDirectory: "/tmp/recordings")
+    #expect(config.trimWhitespace && config.recordingsDirectory == "/tmp/recordings")
+    #expect(try Configuration.load(from: url) == config)
+    config.language = "ja"
+    try config.save(to: url)
+    #expect(try Configuration.loadOrCreate(from: url, recordingsDirectory: "/tmp/other") == config)
+    let broken = Data("broken JSON".utf8)
+    try broken.write(to: url)
+    #expect(throws: (any Error).self) { try Configuration.loadOrCreate(from: url, recordingsDirectory: "/tmp/other") }
+    #expect(try Data(contentsOf: url) == broken)
 }

@@ -40,3 +40,11 @@ Kept the dependency-free shared core and thin platform interfaces. Consolidated 
 Twelve core tests and the macOS release build passed. Added coverage for archived raw-response preservation, trimmed delivery text, completion metadata, and failure before completion when an output cannot be written. Shared core and iOS UI compiler checks passed using the iOS simulator SDK; this is not a simulator/device runtime test. The first UI compiler invocation lacked `-parse-as-library`; rerunning with that required flag succeeded.
 
 The running app bundle was not replaced during this review, to avoid another development-signature permission reset. Build products, local credentials/config, recordings, and scratch harnesses are excluded from the commit.
+
+## Key setup and plain transcription — September 8, 2026
+
+- First launch creates a missing config and preserves existing settings; malformed JSON remains an explicit error. Added an isolated filesystem test for this behavior.
+- Status supports direct key-page linking, secure Save & Check, a masked saved-key state, replacement, and confirmed local deletion. Empty input and deletion cancellation were checked in the running app without deleting the user's credential. Actual credential deletion was not exercised against the user's key.
+- Removed focused-text extraction and context history, along with their obsolete tests. Existing archive fields/files remain intact; new recordings have empty prompts/context terms. Accessibility is required only for auto-paste.
+- Ten remaining core tests pass; release compilation and bundle signature verification pass. The rebuilt app launched and reported idle. This does not certify macOS permission grants after ad-hoc signing.
+- The classic app icon and centered 18-point template bird are bundled. Only two glyph PNGs ship; obsolete state PNGs are removed from the generated bundle. REC text and the recording edge light remain. Bundle allocation: 716 KiB.
