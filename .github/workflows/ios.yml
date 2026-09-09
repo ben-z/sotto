@@ -7,6 +7,46 @@ on:
 permissions:
   contents: read
 jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build unsigned iPhone app
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -project iOS/Sotto.xcodeproj -scheme Sotto \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath work/ios-release CODE_SIGNING_ALLOWED=NO build
+      - name: Package and verify unsigned IPA
+        run: |
+          set -euo pipefail
+          mkdir -p work/ipa/Payload
+          ditto work/ios-release/Build/Products/Release-iphoneos/Sotto.app work/ipa/Payload/Sotto.app
+          app=work/ipa/Payload/Sotto.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = dev.sotto.notes
+          test "$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$app/Info.plist")" = iphoneos
+          lipo -verify_arch arm64 "$app/Sotto"
+          test ! -e "$app/embedded.mobileprovision"
+          test ! -d "$app/_CodeSignature"
+          (cd work/ipa && zip -qry Sotto-unsigned.ipa Payload)
+          unzip -t work/ipa/Sotto-unsigned.ipa
+          (cd work/ipa && shasum -a 256 Sotto-unsigned.ipa > Sotto-unsigned.ipa.sha256)
+          echo '### iOS download' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Download the **Sotto-unsigned-ipa** artifact below. The IPA requires signing and provisioning with a sideloading tool before installation on an iPhone or iPad.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: Sotto-unsigned-ipa
+          path: |
+            work/ipa/Sotto-unsigned.ipa
+            work/ipa/Sotto-unsigned.ipa.sha256
+          if-no-files-found: error
   simulator:
     runs-on: macos-15
     timeout-minutes: 15
