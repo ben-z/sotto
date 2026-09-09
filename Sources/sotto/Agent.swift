@@ -1,0 +1,148 @@
+import AppKit
+import ApplicationServices
+import OSLog
+import SottoCore
+
+@MainActor
+final class Agent: NSObject, NSApplicationDelegate {
+    private(set) var session: Session
+    private var settingsWindow: SettingsWindow?
+    private var hotkey: Hotkey?
+    private var item: NSStatusItem?
+    private let indicator = RecordingIndicator()
+    private var signals: [DispatchSourceSignal] = []
+    private var pasteTarget: NSRunningApplication?
+    private let logger = Logger(subsystem: "dev.sotto.app", category: "session")
+    private var lockFD: Int32 = -1
+
+    init(configuration: Configuration) throws {
+        session = try Session(configuration: configuration)
+        super.init()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        do {
+            try FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
+            lockFD = Darwin.open(Paths.support.appendingPathComponent("agent.lock").path, O_CREAT | O_RDWR, 0o600)
+            guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw SottoError("Another Sotto agent is already running, or the lock file is unavailable.") }
+            hotkey = try Hotkey(keyCode: session.configuration.hotkeyKeyCode, modifiers: session.configuration.hotkeyModifiers) { [weak self] pressed in
+                guard let self else { return }
+                if pressed { self.toggle() }
+                else if self.session.configuration.hotkeyMode == "hold" { Task { await self.session.finish() } }
+            }
+            item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            let menu = NSMenu()
+            for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Open Recordings", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("Quit", #selector(quit))] {
+                let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                entry.target = self; menu.addItem(entry)
+            }
+            item?.menu = menu
+            connectSession()
+            installSignal(SIGUSR1) { [weak self] in self?.toggle() }
+            installSignal(SIGUSR2) { [weak self] in self?.cancel() }
+            installSignal(SIGTERM) { [weak self] in self?.quit() }
+            installSignal(SIGINT) { [weak self] in self?.quit() }
+            update()
+            // Recheck live prerequisites on launch; never persist a stale setup-complete flag.
+            editConfig()
+            settingsWindow?.present(showStatus: true)
+        } catch {
+            fputs("Sotto startup failed: \(error.localizedDescription)\n", stderr)
+            logger.error("Startup failed: \(error.localizedDescription, privacy: .public)")
+            try? JSONFile.write(["state": "startup_failed", "message": error.localizedDescription], to: Paths.status)
+            exit(1)
+        }
+    }
+
+    private func installSignal(_ number: Int32, action: @escaping @MainActor () -> Void) {
+        signal(number, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+        source.setEventHandler { MainActor.assumeIsolated { action() } }
+        source.resume(); signals.append(source)
+    }
+
+    @objc func toggle() {
+        if session.state == .recording || session.state == .preparing { Task { await session.finish() }; return }
+        guard session.state != .transcribing else { NSSound.beep(); return }
+        do {
+            if session.configuration.paste || session.configuration.captureFocusedContext {
+                guard AXIsProcessTrusted() else { throw SottoError("Recording blocked: auto-paste or focused context is enabled but Accessibility access is missing. Grant access in Status, or turn these options off in Settings. The shortcut itself does not need Accessibility.") }
+            }
+            pasteTarget = NSWorkspace.shared.frontmostApplication
+            let terms = session.configuration.captureFocusedContext ? try FocusedContext.terms() : []
+            Task { await session.begin(contextTerms: terms) }
+        } catch { session.fail(error) }
+    }
+
+    @objc func cancel() { Task { await session.cancel() } }
+    @objc func openRecordings() { NSWorkspace.shared.open(session.archive.directory) }
+    @objc func editConfig() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindow(configuration: session.configuration, configurationURL: Paths.config, onSave: { [weak self] config in
+                guard let self else { throw SottoError("Sotto is shutting down.") }
+                try self.applyConfiguration(config)
+            }, onClose: { [weak self] in self?.settingsWindow = nil })
+        }
+        settingsWindow?.present(showStatus: session.state == .error, error: session.state == .error ? session.message : nil)
+    }
+    private func applyConfiguration(_ config: Configuration) throws {
+        guard session.state == .idle || session.state == .error else {
+            throw SottoError("Finish the current recording/transcription before saving settings.")
+        }
+        guard try Configuration.load(from: Paths.config) == session.configuration else {
+            throw SottoError("Configuration was edited outside Sotto. Restart to load those changes before saving here.")
+        }
+        if config.paste || config.captureFocusedContext {
+            guard AXIsProcessTrusted() else { throw SottoError("Grant Sotto Accessibility access, then click Save again.") }
+        }
+        let replacement = try Session(configuration: config)
+        try config.save(to: Paths.config)
+        session = replacement
+        connectSession()
+        update()
+    }
+
+    private func connectSession() {
+        session.onChange = { [weak self] in self?.update() }
+        session.onTranscript = { [weak self] text in try self?.deliver(text) }
+    }
+
+    @objc func quit() {
+        Task {
+            await session.cancel()
+            // Let an in-flight cancelled upload persist its final metadata.
+            while session.state == .transcribing { try? await Task.sleep(for: .milliseconds(50)) }
+            do { try JSONFile.write(["state": "stopped", "message": "Agent exited"], to: Paths.status) }
+            catch { logger.error("Cannot save shutdown status: \(error.localizedDescription, privacy: .public)") }
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func update() {
+        let symbols: [Session.State: String] = [.idle: "mic", .preparing: "ellipsis", .recording: "record.circle.fill", .transcribing: "arrow.up.circle", .error: "exclamationmark.triangle"]
+        item?.button?.image = NSImage(systemSymbolName: symbols[session.state]!, accessibilityDescription: "Sotto \(session.state.rawValue)")
+        item?.button?.toolTip = session.message
+        item?.button?.title = session.state == .recording ? " REC" : ""
+        indicator.update(session.state)
+        logger.notice("\(self.session.state.rawValue, privacy: .public): \(self.session.message, privacy: .public)")
+        do { try JSONFile.write(["state": session.state.rawValue, "message": session.message], to: Paths.status) }
+        catch { logger.error("Cannot save status: \(error.localizedDescription, privacy: .public)"); fputs("Sotto status write failed: \(error.localizedDescription)\n", stderr) }
+        if session.state == .error {
+            NSSound.beep()
+            editConfig()
+        }
+    }
+
+    private func deliver(_ text: String) throws {
+        NSPasteboard.general.clearContents()
+        guard NSPasteboard.general.setString(text, forType: .string) else { throw SottoError("Cannot write transcript to clipboard.") }
+        guard session.configuration.paste else { return }
+        guard AXIsProcessTrusted() else { throw SottoError("Accessibility permission missing; transcript is on clipboard.") }
+        guard let pasteTarget, NSWorkspace.shared.frontmostApplication?.processIdentifier == pasteTarget.processIdentifier else {
+            throw SottoError("Foreground app changed while recording; transcript is on clipboard. Paste manually.")
+        }
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true), let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else { throw SottoError("Cannot create paste event; transcript is on clipboard.") }
+        down.flags = .maskCommand; up.flags = .maskCommand
+        down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+    }
+}

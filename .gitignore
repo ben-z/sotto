@@ -1,0 +1,6 @@
+/.build/
+/.swiftpm/
+/work/
+/iOS/build/
+**/xcuserdata/
+**/.DS_Store

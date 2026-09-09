@@ -1,0 +1,3 @@
+#!/bin/zsh
+set -euo pipefail
+exec "${0:A:h:h}/.build/Sotto.app/Contents/MacOS/sotto" "$@"
