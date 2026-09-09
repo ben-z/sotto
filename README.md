@@ -71,7 +71,7 @@ Native development UI captured with example paths. See [how the images are gener
 
 ## Quiet updates
 
-Sotto checks GitHub at launch and once daily while running. A newer version appears **inside the menu**, with **Download Sotto…** opening its release page. No popups, notification badges, automatic downloads, or installer.
+Sotto checks GitHub at launch and once daily while running. A newer version appears **inside the menu**, with **Download Sotto…** opening its release page. Download and install updates when you’re ready.
 
 Turn off **Updates** in Settings to disable automatic checks. **Check for Updates** still works manually. Checks send no recordings, transcripts, or Groq key. Failed checks appear in the menu and native logs without interrupting dictation; releases are offered only after their app ZIP is uploaded.
 

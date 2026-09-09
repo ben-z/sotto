@@ -23,7 +23,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     private let mode = NSPopUpButton()
     private let shortcut: ShortcutButton
     private let paste = NSButton(checkboxWithTitle: "Paste into the active app", target: nil, action: nil)
-    private let automaticUpdates = NSButton(checkboxWithTitle: "Check automatically · no popups", target: nil, action: nil)
+    private let automaticUpdates = NSButton(checkboxWithTitle: "Check for updates automatically", target: nil, action: nil)
     private let trim = NSButton(checkboxWithTitle: "Trim surrounding whitespace", target: nil, action: nil)
     private let folder = NSTextField(labelWithString: "")
     private let logs = LogsView(frame: .zero)
