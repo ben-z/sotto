@@ -36,10 +36,18 @@ jobs:
             -default-test-execution-time-allowance 90 \
             -maximum-test-execution-time-allowance 120 \
             -resultBundlePath work/ios-tests.xcresult test
+      - name: Collect app diagnostics
+        if: always()
+        run: |
+          mkdir -p work
+          xcrun simctl spawn "$SOTTO_TEST_DEVICE" log show --last 10m --style compact \
+            --predicate 'subsystem == "dev.sotto.notes"' > work/ios-session.log
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: ios-test-results
-          path: work/ios-tests.xcresult
+          path: |
+            work/ios-tests.xcresult
+            work/ios-session.log
           if-no-files-found: error

@@ -2,7 +2,22 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    func testKeyOnboarding() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.secureTextFields["Groq API key"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Add a Groq API key to transcribe your recordings."].exists)
+        XCTAssertFalse(app.buttons["Save and check key"].isEnabled)
+        XCTAssertTrue(app.buttons["Create a Groq API key"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["record-note"].waitForExistence(timeout: 5))
+    }
+
     func testRecordEditAndRecoverWithoutKey() throws {
+        continueAfterFailure = false
         let app = XCUIApplication()
         app.launch()
         let record = app.buttons["record-note"]

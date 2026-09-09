@@ -43,12 +43,12 @@ public final class NoteLibrary: ObservableObject {
 
     public func save(_ note: RecordingRecord) throws {
         try archive.save(note)
-        log.info("Note \(note.id, privacy: .public): \(note.status, privacy: .public)")
+        log.notice("Note \(note.id, privacy: .public): \(note.status, privacy: .public)")
         try reload()
     }
 
     public func queue(_ note: RecordingRecord, duration: Double? = nil) throws {
-        var note = note
+        var note = notes.first { $0.id == note.id } ?? note
         let size = try archive.audioURL(note).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size > 0 else { throw SottoError("This note has no playable audio. Its metadata has been retained.") }
         note.status = "queued"; note.error = nil; note.audioBytes = size
@@ -96,7 +96,7 @@ public final class NoteLibrary: ObservableObject {
                 note = notes.first { $0.id == candidate.id } ?? note
                 try archive.complete(&note, with: result)
                 completed = true
-                log.info("Note \(note.id, privacy: .public): complete")
+                log.notice("Note \(note.id, privacy: .public): complete")
                 try reload()
             } catch {
                 if completed {

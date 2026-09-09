@@ -6,13 +6,13 @@ Audio is saved locally before transcription. Add your Groq API key in Settings t
 
 ## Storage and privacy
 
-The default library is **Files → On My iPhone → Sotto → Recordings**. Every note has AAC audio and JSON metadata. Completed transcriptions add the original `.txt` transcript and Groq `.response.json`; editing creates a separate `.md` file. Original audio and machine output are retained. Back up the folder before deleting Sotto.
+The default library is **Files → On My iPhone → Sotto → Recordings**. Settings lets you choose another library folder; existing notes remain in their original folder. Every note has AAC audio and JSON metadata. Completed transcriptions add the original `.txt` transcript and Groq `.response.json`; editing creates a separate `.md` file. Original audio and machine output are retained. Back up the folder before deleting Sotto.
 
 The Groq key is stored in the device’s Keychain. Transcription sends the recording to Groq using that key. Local-first describes storage and queueing; transcription itself requires the network.
 
 ## Action Button
 
-Choose **Settings → Action Button → Shortcut → Sotto → Record a voice note**. The App Shortcut opens Sotto and starts recording; running it again stops and saves. The audio background mode keeps an active recording running when you leave the app or lock your phone. A system audio interruption finalizes the current note. Recordings stop after 30 minutes.
+Choose **Settings → Action Button → Shortcut → Sotto → Record a voice note**. The App Shortcut opens Sotto and starts recording; running it again stops and saves. The audio background mode keeps an active recording running when you leave the app or lock your phone. A system audio interruption finalizes the current note. Force-quitting during recording can leave an incomplete audio file; Sotto flags it on relaunch. Recordings stop after 30 minutes.
 
 Starting from a locked physical iPhone and handling real calls/routes still require device testing. The shortcut opens the app; it does not promise recording from a locked phone without unlocking.
 
@@ -33,6 +33,6 @@ The UI test requires a simulator with microphone input and no Groq key. It recor
 
 ## Architecture
 
-`NotesStore` owns the recorder, playback, and a single transcription task. `NoteLibrary` reads and writes the durable files and processes the queue. `Recorder`, `Archive`, `GroqClient`, and Keychain storage are shared with the macOS app. SwiftUI provides the list, note editor, and Settings; App Intents supplies the shortcut. There is no database, web service, polling worker, or synchronization layer.
+`NotesStore` owns the recorder, playback, and a single transcription task. `NoteLibrary` reads and writes the durable files and processes the queue. `Recorder`, `Archive`, `GroqClient`, and Keychain storage are shared with the macOS app. SwiftUI provides the list, note editor, and Settings; App Intents supplies the shortcut. Queue state lives in the same files as the notes.
 
 Diagnostic queue events use Unified Logging (`dev.sotto.notes`). Per-note metadata retains status, timing, and errors alongside the audio.

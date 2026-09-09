@@ -37,7 +37,7 @@ public enum GroqKeychain {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(request as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty else {
-            throw SottoError("Groq API key unavailable in Keychain (OSStatus \(status)). Run `sotto key set`.")
+            throw SottoError("Groq API key unavailable in Keychain (OSStatus \(status)). Add or replace your Groq API key.")
         }
         return key
     }

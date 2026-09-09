@@ -8,7 +8,11 @@ public final class Recorder: NSObject, AVAudioRecorderDelegate {
     public override init() { super.init() }
 
     public static func requestPermission() async -> Bool {
+        #if os(iOS)
+        await AVAudioApplication.requestRecordPermission()
+        #else
         await AVCaptureDevice.requestAccess(for: .audio)
+        #endif
     }
 
     public func start(at url: URL, bitRate: Int) throws {

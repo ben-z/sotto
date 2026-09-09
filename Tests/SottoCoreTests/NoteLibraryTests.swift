@@ -94,3 +94,37 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(calls == 1)
     #expect(library.transcribingID == nil)
 }
+
+@MainActor @Test func finishingRecordingPreservesTitleEdits() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let recording = try library.create(model: "whisper-large-v3-turbo", language: "en")
+    try Data([1, 2, 3]).write(to: library.archive.audioURL(recording))
+    try library.rename(recording, to: "A thought while recording")
+    try library.queue(recording, duration: 5)
+    #expect(library.notes.first?.title == "A thought while recording")
+    #expect(library.notes.first?.durationSeconds == 5)
+}
+
+@MainActor @Test func cancelledUploadReturnsToDurableQueue() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    _ = try queuedNote(library)
+    let (started, signal) = AsyncStream<Void>.makeStream()
+    let task = Task {
+        await library.process(key: { "fixture" }) { _, _, _ in
+            signal.yield(()); signal.finish()
+            try await Task.sleep(for: .seconds(60))
+            throw SottoError("Cancellation did not reach the upload")
+        }
+    }
+    for await _ in started { break }
+    task.cancel()
+    await task.value
+    #expect(library.notes.first?.status == "queued")
+    #expect(library.notes.first?.error == nil)
+    #expect(library.transcribingID == nil)
+    #expect(try NoteLibrary(directory: directory).notes.first?.status == "queued")
+}
