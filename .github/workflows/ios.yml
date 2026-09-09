@@ -31,7 +31,7 @@ jobs:
           app=work/ipa/Payload/Sotto.app
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = dev.sotto.notes
           test "$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$app/Info.plist")" = iphoneos
-          lipo -verify_arch arm64 "$app/Sotto"
+          lipo "$app/Sotto" -verify_arch arm64
           test ! -e "$app/embedded.mobileprovision"
           test ! -d "$app/_CodeSignature"
           (cd work/ipa && zip -qry Sotto-unsigned.ipa Payload)
