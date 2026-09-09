@@ -1,8 +1,9 @@
-Sotto v0.1.6 adds manual update checks to Settings.
+Sotto v0.1.7 simplifies the menu-bar dropdown.
 
-- **Check for Updates** appears beside the installed version, with a separate result line and a **Download Update…** button when a release is ready.
-- A published release whose app is still building is labeled **download is being prepared**, rather than a failed check.
-- Settings and the menu share the same update checker and results.
+- Recording controls, transcript actions, and app settings are grouped separately.
+- Cancel appears during recording or transcription; Copy Last Transcript stays in a consistent position.
+- Available updates appear as a download action. Detailed check results and manual checks are in Settings.
+- Update state is shared independently of menu presentation, and disabling automatic checks clears stale error details.
 
 Download the universal ZIP below for Apple silicon and Intel Macs running macOS 14+. Quit Sotto, replace the app in the same location, and reopen it. Existing settings, recordings, and your Groq key are preserved.
 
