@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import signal
 import unittest
 import time
 
@@ -76,9 +77,12 @@ class BenchmarkTests(unittest.TestCase):
         process = subprocess.Popen(['/bin/bash', '-c', 'while :; do :; done'])
         try:
             time.sleep(0.25)
+            os.kill(process.pid, signal.SIGSTOP)
+            _, stopped = os.waitpid(process.pid, os.WUNTRACED)
+            self.assertTrue(os.WIFSTOPPED(stopped))
             sampled = benchmark.Sampler(process.pid, Path('/bin/bash')).read()['cpu_seconds']
         finally:
-            process.terminate()
+            process.kill()  # Stopped process cannot accrue CPU between sample and wait4.
             _, status, usage = os.wait4(process.pid, 0)
             process.returncode = os.waitstatus_to_exitcode(status)
         actual = usage.ru_utime + usage.ru_stime
