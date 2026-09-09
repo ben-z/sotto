@@ -17,7 +17,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     private let paste = NSButton(checkboxWithTitle: "Paste into the active app", target: nil, action: nil)
     private let trim = NSButton(checkboxWithTitle: "Trim surrounding whitespace", target: nil, action: nil)
     private let folder = NSTextField(labelWithString: "")
-    private let errorLabel = NSTextField(wrappingLabelWithString: "")
+    private let logs = LogsView(frame: .zero)
 
     init(configuration: Configuration, configurationURL: URL, onSave: @escaping (Configuration) throws -> Void, onClose: @escaping () -> Void) {
         original = configuration; saveConfiguration = onSave; didClose = onClose
@@ -73,9 +73,6 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
 
         let description = NSTextField(wrappingLabelWithString: "Changes apply when you save. All recordings are kept; choosing a new folder leaves existing files in place.")
         description.textColor = .secondaryLabelColor
-        errorLabel.textColor = .systemRed
-        errorLabel.font = .systemFont(ofSize: 11)
-        errorLabel.maximumNumberOfLines = 0
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
         cancel.keyEquivalent = "\u{1b}"
         saveButton.target = self; saveButton.action = #selector(save)
@@ -97,9 +94,10 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         }, needsAccessibility: { [weak self] in self?.paste.state == .on })
         let settingsTab = NSTabViewItem(identifier: "settings"); settingsTab.label = "Settings"; settingsTab.view = general
         let statusTab = NSTabViewItem(identifier: "status"); statusTab.label = "Status"; statusTab.view = diagnostics
-        tabs.addTabViewItem(settingsTab); tabs.addTabViewItem(statusTab)
+        let logsTab = NSTabViewItem(identifier: "logs"); logsTab.label = "Logs"; logsTab.view = logs
+        tabs.addTabViewItem(settingsTab); tabs.addTabViewItem(statusTab); tabs.addTabViewItem(logsTab)
         tabs.delegate = self
-        for view in [tabs, errorLabel, buttons] {
+        for view in [tabs, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(view)
         }
         NSLayoutConstraint.activate([
@@ -112,10 +110,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
             tabs.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             tabs.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             tabs.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            tabs.bottomAnchor.constraint(equalTo: errorLabel.topAnchor, constant: -10),
-            errorLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            errorLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            errorLabel.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -10),
+            tabs.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -16),
             buttons.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             buttons.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16)
@@ -135,8 +130,10 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     }
     private func value(_ control: NSPopUpButton) -> String { control.selectedItem!.representedObject as! String }
 
+    func showIssue(_ visible: Bool) { diagnostics.showIssue(visible) }
+
     func present(showStatus: Bool = false, error: String? = nil) {
-        errorLabel.stringValue = error.map { "Last attempt: " + $0 } ?? ""
+        diagnostics.showIssue(error != nil)
         diagnostics.refresh()
         if showStatus { tabs.selectTabViewItem(at: 1) }
         tabView(tabs, didSelect: tabs.selectedTabViewItem)
@@ -164,7 +161,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     @objc private func copyConfigPath(_ sender: NSButton) {
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(configurationURL.path, forType: .string) { sender.title = "Path Copied" }
-        else { errorLabel.stringValue = "Could not copy the configuration path." }
+        else { showError("Could not copy the configuration path.") }
     }
     @objc private func revealConfig() { NSWorkspace.shared.activateFileViewerSelecting([configurationURL]) }
     @objc private func cancel() { close() }
@@ -181,7 +178,17 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     @objc private func save() {
         let config = editedConfiguration
         do { try saveConfiguration(config); close() }
-        catch { errorLabel.stringValue = error.localizedDescription }
+        catch { showError(error.localizedDescription) }
+    }
+
+    private func showError(_ message: String) {
+        AppLog.shared.record(message, error: true)
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Could not complete this action"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
     }
 
     private func updateButtons() {
@@ -191,6 +198,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
 
     func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         updateButtons()
+        if tabViewItem?.identifier as? String == "logs" { logs.reload() }
         guard let window else { return }
         let height: CGFloat = tabViewItem?.identifier as? String == "settings" ? 410 : 650
         var frame = window.frame
@@ -200,7 +208,10 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         window.setFrame(frame, display: true)
     }
 
-    func windowDidBecomeKey(_ notification: Notification) { diagnostics.refresh() }
+    func windowDidBecomeKey(_ notification: Notification) {
+        diagnostics.refresh()
+        if tabs.selectedTabViewItem?.identifier as? String == "logs" { logs.reload() }
+    }
     func windowWillClose(_ notification: Notification) {
         diagnostics.cancelCheck()
         NSApp.setActivationPolicy(.accessory)

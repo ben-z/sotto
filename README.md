@@ -39,7 +39,7 @@ Audio is transcribed after recording stops. There is no always-on microphone, lo
 
 ## Efficiency
 
-Native Swift with no third-party runtime dependencies or local model downloads. The current arm64 development app occupies **748 KiB on disk**, excluding retained recordings.
+Native Swift with no third-party runtime dependencies or local model downloads. The current arm64 development app occupies **772 KiB on disk**, excluding retained recordings.
 
 [CI resource reports](https://github.com/ben-z/sotto/actions/workflows/ci.yml) are the regression source of truth: every push and pull request measures the optimized production core on Apple Silicon and Intel with fixed audio fixtures and a local HTTP server. Memory growth, peak footprint, and packaged app size have enforced limits; CPU and raw samples are reported too. This controlled test requires no credentials or microphone and does not measure the menu-bar UI or Groq inference. The [first verified CI baseline](docs/ci-performance-baseline.md) preserves measurements from both runners.
 
@@ -50,6 +50,10 @@ A separate [live app measurement](docs/performance-results.md) on an Apple M4 me
 New recordings go to `~/Documents/Sotto` by default. Each attempt keeps its audio and diagnostic metadata; successful transcriptions also include a text file and the raw Groq response. Failed and cancelled recordings are retained too.
 
 Audio uses compact AAC, approximately **14.4 MB per hour**. Nothing is automatically deleted. Changing the recording folder affects new recordings only.
+
+## Diagnostics
+
+Open **Settings → Logs** for timestamped session events and errors, with Refresh, Copy Logs, and Show in Finder. Logs persist at `~/Library/Application Support/Sotto/Logs/` in two files capped at 256 KiB each. They are written only on events, with no background polling. Audio, transcripts, and raw Groq responses remain in your recording folder.
 
 ## CLI
 

@@ -110,6 +110,7 @@ struct CLI {
         }
     }
     @MainActor static func showStartupError(_ error: Error) {
+        AppLog.shared.record("Startup failed: \(error.localizedDescription)", error: true)
         let alert = NSAlert()
         alert.messageText = "Sotto could not start"
         alert.informativeText = error.localizedDescription

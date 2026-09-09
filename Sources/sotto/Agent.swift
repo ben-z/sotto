@@ -1,7 +1,6 @@
 import AppKit
 import ApplicationServices
 import AVFoundation
-import OSLog
 import SottoCore
 
 @MainActor
@@ -18,7 +17,6 @@ final class Agent: NSObject, NSApplicationDelegate {
     private let indicator = RecordingIndicator()
     private var signals: [DispatchSourceSignal] = []
     private var pasteTarget: NSRunningApplication?
-    private let logger = Logger(subsystem: "dev.sotto.app", category: "session")
     private var lockFD: Int32 = -1
 
     init(configuration: Configuration) throws {
@@ -27,6 +25,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppLog.shared.record("Sotto started · version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development")")
         do {
             try FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
             lockFD = Darwin.open(Paths.support.appendingPathComponent("agent.lock").path, O_CREAT | O_RDWR, 0o600)
@@ -65,7 +64,6 @@ final class Agent: NSObject, NSApplicationDelegate {
             }
         } catch {
             fputs("Sotto startup failed: \(error.localizedDescription)\n", stderr)
-            logger.error("Startup failed: \(error.localizedDescription, privacy: .public)")
             try? JSONFile.write(["state": "startup_failed", "message": error.localizedDescription], to: Paths.status)
             CLI.showStartupError(error)
             exit(1)
@@ -84,7 +82,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         guard session.state != .transcribing else { NSSound.beep(); return }
         do {
             if session.configuration.paste {
-                guard AXIsProcessTrusted() else { throw SottoError("Recording blocked: auto-paste is enabled but Accessibility access is missing. Grant access in Status, or turn auto-paste off in Settings. The shortcut itself does not need Accessibility.") }
+                guard AXIsProcessTrusted() else { throw SottoError("Allow Accessibility access in System Settings to use auto-paste, or turn auto-paste off in Sotto Settings.") }
             }
             pasteTarget = NSWorkspace.shared.frontmostApplication
             Task { await session.begin() }
@@ -132,6 +130,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         let replacement = try Session(configuration: config)
         try config.save(to: Paths.config)
         session = replacement
+        AppLog.shared.record("Settings saved")
         connectSession()
         update()
     }
@@ -147,7 +146,8 @@ final class Agent: NSObject, NSApplicationDelegate {
             // Let an in-flight cancelled upload persist its final metadata.
             while session.state == .transcribing { try? await Task.sleep(for: .milliseconds(50)) }
             do { try JSONFile.write(["state": "stopped", "message": "Agent exited"], to: Paths.status) }
-            catch { logger.error("Cannot save shutdown status: \(error.localizedDescription, privacy: .public)") }
+            catch { AppLog.shared.record("Cannot save shutdown status: \(error.localizedDescription)", error: true) }
+            AppLog.shared.record("Sotto stopped")
             NSApp.terminate(nil)
         }
     }
@@ -174,9 +174,10 @@ final class Agent: NSObject, NSApplicationDelegate {
         item?.button?.toolTip = session.message
         item?.button?.title = session.state == .recording ? " REC" : ""
         indicator.update(session.state)
-        logger.notice("\(self.session.state.rawValue, privacy: .public): \(self.session.message, privacy: .public)")
+        settingsWindow?.showIssue(session.state == .error)
+        AppLog.shared.record(session.state == .error ? session.message : "\(session.state.rawValue): \(session.message)", error: session.state == .error)
         do { try JSONFile.write(["state": session.state.rawValue, "message": session.message], to: Paths.status) }
-        catch { logger.error("Cannot save status: \(error.localizedDescription, privacy: .public)"); fputs("Sotto status write failed: \(error.localizedDescription)\n", stderr) }
+        catch { AppLog.shared.record("Cannot save status: \(error.localizedDescription)", error: true) }
         if session.state == .error {
             NSSound.beep()
             editConfig()

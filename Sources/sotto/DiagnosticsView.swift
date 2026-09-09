@@ -7,6 +7,7 @@ import SottoCore
 final class DiagnosticsView: NSView {
     private let selectedModel: () -> String
     private let needsAccessibility: () -> Bool
+    private let issue = NSTextField(wrappingLabelWithString: "The last action failed. Open Logs for details.")
     private let readiness = NSTextField(wrappingLabelWithString: "")
     private var connectionVerified = false
     private var replacingKey = false
@@ -41,10 +42,10 @@ final class DiagnosticsView: NSView {
         deleteKey.target = self; deleteKey.action = #selector(confirmDeleteKey)
         let keyButtons = row([check, getKey, deleteKey])
         let axButton = NSButton(title: "Open Accessibility Settings…", target: self, action: #selector(openAccessibility))
-        axButton.toolTip = "If an enabled entry belongs to an older development build, remove it and add the current Sotto app again."
+        axButton.toolTip = "Enable Sotto in Privacy & Security > Accessibility."
         let refreshButton = NSButton(title: "Refresh Status", target: self, action: #selector(refresh))
         let stack = NSStackView(views: [
-            readiness, separator(), heading("Groq connection"), keyStatus,
+            issue, readiness, separator(), heading("Groq connection"), keyStatus,
             note("Your key stays in this device’s Keychain, never in your config file."),
             keyEntry, connection, keyButtons,
             note("Audio goes directly to Groq using your account. All recordings stay in your chosen folder."),
@@ -66,6 +67,8 @@ final class DiagnosticsView: NSView {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         keyStatus.toolTip = "macOS Keychain · service Sotto.Groq · account api-key"
+        issue.textColor = .systemRed
+        issue.isHidden = true
         readiness.font = .systemFont(ofSize: 13, weight: .semibold)
         refresh()
     }
@@ -79,6 +82,8 @@ final class DiagnosticsView: NSView {
     }
     private func separator() -> NSBox { let box = NSBox(); box.boxType = .separator; return box }
     private func row(_ views: [NSView]) -> NSStackView { let row = NSStackView(views: views); row.orientation = .horizontal; row.spacing = 8; return row }
+
+    func showIssue(_ visible: Bool) { issue.isHidden = !visible }
 
     @objc func refresh() {
         let storage = GroqKeychain.storageStatus()
@@ -170,10 +175,12 @@ final class DiagnosticsView: NSView {
                 guard !Task.isCancelled else { return }
                 let time = Date().formatted(date: .omitted, time: .shortened)
                 self?.connection.stringValue = "Accepted by Groq at \(time) · \(model) is listed"
+                AppLog.shared.record("Groq connection verified · \(model)")
                 self?.connectionVerified = true
                 self?.connection.textColor = .systemGreen
             } catch {
                 guard !Task.isCancelled else { return }
+                AppLog.shared.record("Groq connection check failed: \(error.localizedDescription)", error: true)
                 self?.connection.stringValue = error.localizedDescription
                 self?.connection.textColor = .systemRed
             }
@@ -193,10 +200,12 @@ final class DiagnosticsView: NSView {
         }
         do {
             try GroqKeychain.save(keyField.stringValue)
+            AppLog.shared.record("Groq key saved to Keychain")
             keyField.stringValue = ""
             replacingKey = false
             checkConnection()
         } catch {
+            AppLog.shared.record("Could not save Groq key: \(error.localizedDescription)", error: true)
             connection.stringValue = error.localizedDescription
             connection.textColor = .systemRed
             refresh()
@@ -224,11 +233,13 @@ final class DiagnosticsView: NSView {
             guard response == .alertSecondButtonReturn, let self else { return }
             do {
                 try GroqKeychain.delete()
+                AppLog.shared.record("Groq key deleted from Keychain")
                 self.cancelCheck()
                 self.replacingKey = false
                 self.connection.stringValue = "Key deleted from this device. Add a key to transcribe."
                 self.connection.textColor = .secondaryLabelColor
             } catch {
+                AppLog.shared.record("Could not delete Groq key: \(error.localizedDescription)", error: true)
                 self.connection.stringValue = error.localizedDescription
                 self.connection.textColor = .systemRed
             }
@@ -247,7 +258,8 @@ final class DiagnosticsView: NSView {
     @objc private func microphoneAction() {
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             Task { [weak self] in
-                _ = await Recorder.requestPermission()
+                let granted = await Recorder.requestPermission()
+                AppLog.shared.record(granted ? "Microphone access allowed" : "Microphone access denied", error: !granted)
                 self?.refresh()
             }
         } else { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
