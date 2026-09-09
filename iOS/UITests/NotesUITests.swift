@@ -2,6 +2,30 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    private func enableLocation(in app: XCUIApplication) {
+        app.buttons["Settings"].tap()
+        app.swipeUp()
+        let location = app.switches["Save recording location"]
+        XCTAssertTrue(location.waitForExistence(timeout: 5))
+        if location.value as? String == "0" {
+            location.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+            let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow While Using App"]
+            if allow.waitForExistence(timeout: 4) { allow.tap() }
+        }
+        XCTAssertEqual(location.value as? String, "1", "Location capture must be enabled before testing it")
+    }
+
+    func testLocationOptIn() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        enableLocation(in: app)
+        let location = app.switches["Save recording location"]
+        location.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertEqual(location.value as? String, "0")
+        app.buttons["Done"].tap()
+    }
+
     func testBatchDeletionAndCancel() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
@@ -37,6 +61,8 @@ final class NotesUITests: XCTestCase {
         app.buttons["Cancel"].tap()
         XCTAssertTrue(fixture.exists)
         fixture.swipeLeft()
+        // A full swipe invokes Delete immediately; a shorter swipe exposes its button.
+        if app.buttons["Delete"].exists { app.buttons["Delete"].tap() }
         XCTAssertTrue(app.buttons["Delete permanently"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
         XCTAssertTrue(fixture.exists)
@@ -140,11 +166,7 @@ final class NotesUITests: XCTestCase {
             }
             return false
         }
-        app.buttons["Settings"].tap()
-        app.swipeUp()
-        let location = app.switches["Save recording location"]
-        XCTAssertTrue(location.waitForExistence(timeout: 5))
-        if location.value as? String == "0" { location.tap(); app.tap() }
+        enableLocation(in: app)
         app.buttons["Done"].tap()
         record.tap()
         // Trigger the interruption handler even when the permission alert belongs to SpringBoard.
