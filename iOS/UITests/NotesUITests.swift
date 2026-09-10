@@ -212,18 +212,9 @@ final class NotesUITests: XCTestCase {
         app.launch()
         let record = app.buttons["record-note"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
-        addUIInterruptionMonitor(withDescription: "Microphone permission") { alert in
-            for label in ["Allow While Using App", "Allow"] {
-                let allow = alert.buttons[label]
-                if allow.exists { allow.tap(); return true }
-            }
-            return false
-        }
         enableLocation(in: app)
         app.buttons["Done"].tap()
         record.tap()
-        // Trigger the interruption handler even when the permission alert belongs to SpringBoard.
-        app.tap()
         let stop = app.buttons["Stop recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 15), "Recording must become responsive")
         let recordingImage = XCTAttachment(screenshot: app.screenshot())
