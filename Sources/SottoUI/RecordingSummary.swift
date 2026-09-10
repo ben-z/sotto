@@ -1,4 +1,5 @@
 import SwiftUI
+import SottoCore
 
 public struct RecordingSummary: View {
     public let note: RecordingRecord
@@ -27,5 +28,11 @@ public struct RecordingSummary: View {
         case "cancelled": "Cancelled · Audio retained"
         default: "Transcription failed · Retry available"
         }
+    }
+}
+
+public extension RecordingRecord {
+    var transcriptionActionTitle: String {
+        transcribedModel != nil || status == "complete" ? "Retranscribe…" : "Transcribe…"
     }
 }

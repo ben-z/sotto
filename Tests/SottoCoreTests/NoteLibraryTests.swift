@@ -333,3 +333,38 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(history.notes.map(\.id) == [note.id])
     #expect(history.notes.first?.status == "queued")
 }
+
+@MainActor @Test func replacingEditedNoteRestoresMachineTranscriptUpdates() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let note = try queuedNote(library)
+    try library.rename(note, to: "My title")
+    try library.saveText("My edits", for: note)
+    let audio = try Data(contentsOf: library.archive.audioURL(note))
+    await library.process(ids: [note.id], key: { "fixture" }) { _, _, _ in
+        TranscriptionResult(text: "New machine output", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
+    }
+    #expect(try library.text(for: note) == "My edits")
+    #expect(try library.machineTranscript(for: note) == "New machine output")
+    try library.useMachineTranscript(for: note)
+    #expect(!library.hasEditedText(for: note))
+    #expect(try library.text(for: note) == "New machine output")
+    #expect(library.notes.first?.title == "My title")
+    #expect(try Data(contentsOf: library.archive.audioURL(note)) == audio)
+    try library.transcribe([note.id], model: "whisper-large-v3", language: "en")
+    await library.process(ids: [note.id], key: { "fixture" }) { _, _, _ in
+        TranscriptionResult(text: "Next machine output", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
+    }
+    #expect(try library.text(for: note) == "Next machine output")
+}
+
+@MainActor @Test func missingMachineTranscriptDoesNotEraseEditedNote() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let note = try queuedNote(library)
+    try library.saveText("Only copy of my edits", for: note)
+    #expect(throws: (any Error).self) { try library.useMachineTranscript(for: note) }
+    #expect(try library.text(for: note) == "Only copy of my edits")
+}

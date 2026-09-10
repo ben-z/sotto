@@ -24,7 +24,7 @@ Your key is stored in macOS Keychain. Audio goes directly to Groq using your acc
 
 Choose **Recordings…** in the menu to browse saved audio, play it, rename recordings, edit notes, or select several recordings to transcribe or delete. The window uses your configured recording folder, including existing recordings. Deletion requires confirmation.
 
-Transcription failures retain the original audio and error. Retry explicitly from the recordings window; requests are not retried after reconnecting. History transcriptions save their results without auto-pasting. Retranscription replaces machine output while preserving edited notes.
+Transcription failures retain the original audio and error. Retry explicitly from the recordings window; requests are not retried after reconnecting. History transcriptions save their results without auto-pasting. Retranscription replaces machine output while preserving edited notes. Expand **Machine transcript** to read or share the result. **Replace note with transcript…** restores the transcript as the note after confirmation. The model/language picker and note/transcript controls share the same SwiftUI code with iPhone and iPad.
 
 ## iPhone and iPad
 

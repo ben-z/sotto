@@ -150,6 +150,25 @@ public final class NoteLibrary: ObservableObject {
         return ""
     }
 
+    public func hasEditedText(for note: RecordingRecord) -> Bool {
+        FileManager.default.fileExists(atPath: archive.directory.appendingPathComponent("\(note.id).md").path)
+    }
+
+    public func hasMachineTranscript(for note: RecordingRecord) -> Bool {
+        FileManager.default.fileExists(atPath: archive.directory.appendingPathComponent("\(note.id).txt").path)
+    }
+
+    public func machineTranscript(for note: RecordingRecord) throws -> String {
+        try String(contentsOf: archive.directory.appendingPathComponent("\(note.id).txt"), encoding: .utf8)
+    }
+
+    public func useMachineTranscript(for note: RecordingRecord) throws {
+        _ = try editableNotes([note.id])
+        _ = try machineTranscript(for: note)
+        try FileManager.default.removeItem(at: archive.directory.appendingPathComponent("\(note.id).md"))
+        objectWillChange.send()
+    }
+
     public func saveText(_ text: String, for note: RecordingRecord) throws {
         // Keep the machine transcript and raw response when a person edits their note.
         try text.write(to: archive.directory.appendingPathComponent("\(note.id).md"), atomically: true, encoding: .utf8)

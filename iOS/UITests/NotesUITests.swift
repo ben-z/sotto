@@ -61,12 +61,12 @@ final class NotesUITests: XCTestCase {
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved"))
         var noteIDs: [String] = []
         for _ in 0..<2 {
-            let count = saved.count
+            let previousID = saved.firstMatch.exists ? saved.firstMatch.identifier : nil
             app.buttons["record-note"].tap()
             XCTAssertTrue(app.buttons["Stop recording"].waitForExistence(timeout: 15))
             Thread.sleep(forTimeInterval: 1)
             app.buttons["Stop recording"].tap()
-            let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in saved.count == count + 1 }, object: nil)
+            let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in saved.firstMatch.exists && saved.firstMatch.identifier != previousID }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [added], timeout: 10), .completed)
             noteIDs.append(saved.firstMatch.identifier)
         }
@@ -255,4 +255,27 @@ final class NotesUITests: XCTestCase {
         attachment.name = "Retained voice note"; attachment.lifetime = .keepAlways
         add(attachment)
     }
+    func testTranscriptReplacesEditedNoteOnlyAfterConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let fixture = app.buttons["note-ios-ui-fixture"]
+        XCTAssertTrue(fixture.waitForExistence(timeout: 10)); fixture.tap()
+        app.buttons["Edit note"].tap()
+        let editor = app.textViews["Note text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5)); editor.tap()
+        editor.typeText(" Replacement test edit.")
+        app.buttons["Save"].tap()
+        app.swipeUp()
+        app.buttons["Machine transcript"].tap()
+        app.buttons["Replace note with transcript…"].tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Replacement test edit.")).firstMatch.exists)
+        app.buttons["Replace note with transcript…"].tap()
+        app.buttons["Replace note"].tap()
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Replacement test edit.")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["Replace note with transcript…"].exists)
+        app.terminate(); app.launch(); fixture.tap()
+        XCTAssertTrue(app.staticTexts["Original fixture transcript."].waitForExistence(timeout: 5))
+    }
+
 }

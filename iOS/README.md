@@ -10,7 +10,7 @@ Language selection in Settings and the transcription sheet includes the full [Wh
 
 Tap a note’s title to rename it, or long-press a list row and choose **Rename**. **Edit note** in the Note section edits only the body; title editing stays separate. Untitled notes use a short excerpt from the transcript automatically; this runs locally and makes no extra API request. Clearing a custom title restores the automatic title.
 
-Note details show the model used for the latest successful transcription. **Retranscribe** lets you choose a model and language for a new attempt. It replaces the machine transcript and raw response, while preserving your edited note text and custom title. Expand **Machine transcript** to read the new result separately from your edits.
+Note details show the model used for the latest successful transcription. **Retranscribe** lets you choose a model and language for a new attempt. It replaces the machine transcript and raw response, while preserving your edited note text and custom title. Expand **Machine transcript** to read or share the new result separately from your edits. **Replace note with transcript…** replaces edited text after confirmation; later transcriptions update the note until you edit it again. These controls and the model/language picker are shared with the Mac app.
 
 Use **Select** on the main list to transcribe or delete several notes. Swipe or long-press a row to delete one. Deletion requires confirmation and permanently removes the audio, metadata, transcripts, and edits. Active recordings and transcriptions cannot be deleted or requeued.
 
@@ -44,6 +44,6 @@ Use a disposable, booted simulator with microphone input, internet access, and n
 
 ## Architecture
 
-`NotesStore` owns the recorder, playback, and a single transcription task. `NoteLibrary` reads and writes the durable files and processes the queue. `Recorder`, `Archive`, `GroqClient`, and Keychain storage are shared with the macOS app. SwiftUI provides the list, note editor, and Settings; App Intents supplies the shortcut. Queue state lives in the same files as the notes.
+`NotesStore` owns the recorder, playback, and a single transcription task. `NoteLibrary` reads and writes the durable files and processes the queue. `Recorder`, `Archive`, `GroqClient`, and Keychain storage are shared with the macOS app. `SottoUI` supplies the shared recording row, note editor, machine transcript controls, and model/language picker. SwiftUI provides platform navigation and Settings; App Intents supplies the shortcut. Queue state lives in the same files as the notes.
 
 Diagnostic queue events use Unified Logging (`dev.sotto.notes`). Per-note metadata retains status, timing, and errors alongside the audio.

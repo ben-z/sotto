@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import SwiftUI
 import SottoCore
+import SottoUI
 
 @MainActor
 final class RecordingsWindow: NSWindowController, NSWindowDelegate {
@@ -88,13 +89,11 @@ final class RecordingsModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             if !flag { self.error = "Playback stopped unexpectedly. The original audio is retained." }
         }
     }
-    func transcribe() {
-        guard !busy, !selection.isEmpty else { return }
+    func transcribe(model: String, language: String?) throws {
+        guard !busy, !selection.isEmpty else { throw SottoError("Select recordings after the current operation finishes.") }
         stop()
-        perform {
-            try library.transcribe(selection, model: session.configuration.model, language: session.configuration.language)
-        }
-        guard error == nil else { return }
+        try library.transcribe(selection, model: model, language: language)
+        error = nil
         working = true
         let ids = selection
         worker = Task {
@@ -135,11 +134,12 @@ private struct RecordingsView: View {
                                        systemImage: "waveform", description: Text("Listen, edit, or transcribe your saved audio."))
             }
         }
+        .navigationTitle("Sotto Recordings")
         .toolbar {
             Button("Show Recordings Folder", systemImage: "folder") { NSWorkspace.shared.open(library.archive.directory) }
             Spacer()
             if model.working { Button("Cancel Transcription") { model.cancelTranscription() } }
-            Button("Transcribe…") { confirming = true }.disabled(model.selection.isEmpty || model.busy)
+            Button(transcriptionTitle) { confirming = true }.disabled(model.selection.isEmpty || model.busy)
             Button("Delete…") { deleting = true }.disabled(model.selection.isEmpty || model.busy)
         }
         .safeAreaInset(edge: .bottom) {
@@ -158,11 +158,16 @@ private struct RecordingsView: View {
                 model.perform { try library.delete(model.selection); model.selection.removeAll() }
             }
         } message: { Text("This permanently deletes the selected audio, transcripts, and notes.") }
-        .confirmationDialog("Transcribe \(selectionDescription)?", isPresented: $confirming) {
-            Button("Transcribe") { model.transcribe() }
-        } message: {
-            Text("Model: \(session.configuration.model)\nLanguage: \(session.configuration.language ?? "Automatic")\nUses your transcription settings. Existing machine transcripts are replaced; edited notes are retained.")
+        .sheet(isPresented: $confirming) {
+            TranscriptionSheet(count: model.selection.count, model: session.configuration.model,
+                               language: session.configuration.language, keyStored: GroqKeychain.storageStatus() != .missing) { selectedModel, language in
+                try model.transcribe(model: selectedModel, language: language)
+            }
         }
+    }
+    private var transcriptionTitle: String {
+        guard model.selection.count == 1, let note = library.notes.first(where: { model.selection.contains($0.id) }) else { return "Transcribe…" }
+        return note.transcriptionActionTitle
     }
     private var selectionDescription: String { "\(model.selection.count) " + (model.selection.count == 1 ? "recording" : "recordings") }
     @State private var confirming = false
@@ -173,7 +178,6 @@ private struct RecordingDetail: View {
     @ObservedObject var library: NoteLibrary
     let note: RecordingRecord
     @State private var title = ""
-    @State private var text = ""
     @State private var renaming = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -192,25 +196,11 @@ private struct RecordingDetail: View {
                 Spacer()
                 Button("Show Audio in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.archive.audioURL(note)]) }
             }
-            if let error = note.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
-            if let used = note.transcribedModel { Text("Transcribed with \(used)").font(.caption).foregroundStyle(.secondary) }
-            HStack {
-                Text("Note").font(.headline)
-                Spacer()
-                if model.editing {
-                    Button("Cancel") { model.editing = false; load() }
-                    Button("Save") { model.perform { try library.saveText(text, for: note); model.editing = false } }.keyboardShortcut("s")
-                } else {
-                    ShareLink("Share Note", item: text).disabled(text.isEmpty)
-                    Button("Edit Note") { model.editing = true }.disabled(model.busy)
-                }
+            ScrollView {
+                NoteContent(library: library, id: note.id, canEdit: !model.busy) { model.editing = $0 }
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if model.editing { TextEditor(text: $text).font(.body) }
-            else { ScrollView { Text(text.isEmpty ? "No transcript yet. Select Transcribe to process the retained audio." : text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) } }
         }
         .padding(24)
-        .onAppear { title = note.title ?? note.generatedTitle ?? ""; load() }
-        .onChange(of: note.status) { _, _ in if !model.editing { load() } }
     }
-    private func load() { model.perform { text = try library.text(for: note) } }
 }
