@@ -1,0 +1,100 @@
+name: iOS
+on:
+  push:
+    branches: [main, ios-voice-notes]
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Build unsigned iPhone app
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          version=$(cat VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'VERSION must have three numeric components' >&2; exit 1; }
+          xcodebuild -project iOS/Sotto.xcodeproj -scheme Sotto \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath work/ios-release CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" build
+      - name: Package and verify unsigned IPA
+        run: |
+          set -euo pipefail
+          mkdir -p work/ipa/Payload
+          ditto work/ios-release/Build/Products/Release-iphoneos/Sotto.app work/ipa/Payload/Sotto.app
+          app=work/ipa/Payload/Sotto.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = dev.sotto.notes
+          test "$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$app/Info.plist")" = iphoneos
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")" = "$(cat VERSION)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")" = "$GITHUB_RUN_NUMBER"
+          lipo "$app/Sotto" -verify_arch arm64
+          test ! -e "$app/embedded.mobileprovision"
+          test ! -d "$app/_CodeSignature"
+          (cd work/ipa && zip -qry Sotto-unsigned.ipa Payload)
+          unzip -t work/ipa/Sotto-unsigned.ipa
+          (cd work/ipa && shasum -a 256 Sotto-unsigned.ipa > Sotto-unsigned.ipa.sha256)
+          echo '### iOS download' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Download the **Sotto-unsigned-ipa** artifact below. The IPA requires signing and provisioning with a sideloading tool before installation on an iPhone or iPad.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: Sotto-unsigned-ipa
+          path: |
+            work/ipa/Sotto-unsigned.ipa
+            work/ipa/Sotto-unsigned.ipa.sha256
+          if-no-files-found: error
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Verify toolchain and create test device
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          device=$(xcrun simctl create 'Sotto CI' com.apple.CoreSimulator.SimDeviceType.iPhone-16 com.apple.CoreSimulator.SimRuntime.iOS-18-5)
+          echo "SOTTO_TEST_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+      - name: Core tests
+        run: swift test
+      - name: Voice note UI checks
+        env:
+          SOTTO_IOS_RESULT_PATH: work/ios-tests.xcresult
+        run: scripts/test-ios.sh "$SOTTO_TEST_DEVICE"
+      - name: Collect app diagnostics
+        if: always()
+        run: |
+          mkdir -p work
+          xcrun simctl spawn "$SOTTO_TEST_DEVICE" log show --last 10m --style compact \
+            --predicate 'subsystem == "dev.sotto.notes"' > work/ios-session.log
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-test-results
+          path: |
+            work/ios-tests.xcresult
+            work/ios-session.log
+          if-no-files-found: error

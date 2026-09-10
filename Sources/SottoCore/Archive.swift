@@ -1,6 +1,20 @@
 import Foundation
 
-public struct RecordingRecord: Codable, Sendable {
+public struct RecordingRecord: Codable, Sendable, Identifiable {
+    public var title: String?
+    public var generatedTitle: String?
+    public var timeZoneIdentifier: String?
+    public var location: RecordingLocation?
+    public var locationStatus: String?
+    public var transcribedModel: String?
+    public var displayTitle: String {
+        if let title, !title.isEmpty { return title }
+        return generatedTitle ?? "Voice note"
+    }
+    static func suggestedTitle(from text: String) -> String? {
+        let heading = text.split(whereSeparator: { $0.isWhitespace }).prefix(9).joined(separator: " ")
+        return heading.isEmpty ? nil : String(heading.prefix(80))
+    }
     public var id: String
     public var startedAt: Date
     public var status: String
@@ -17,8 +31,18 @@ public struct RecordingRecord: Codable, Sendable {
 
     public init(id: String, model: String, language: String?, prompt: String, contextTerms: [String], audioFile: String) {
         self.id = id; startedAt = Date(); status = "recording"
+        timeZoneIdentifier = TimeZone.current.identifier
         self.model = model; self.language = language; self.prompt = prompt
         self.contextTerms = contextTerms; self.audioFile = audioFile
+    }
+}
+
+public struct RecordingLocation: Codable, Sendable {
+    public var latitude: Double
+    public var longitude: Double
+    public var accuracyMeters: Double
+    public init(latitude: Double, longitude: Double, accuracyMeters: Double) {
+        self.latitude = latitude; self.longitude = longitude; self.accuracyMeters = accuracyMeters
     }
 }
 
@@ -54,6 +78,9 @@ public struct Archive: Sendable {
     public func complete(_ record: inout RecordingRecord, with result: TranscriptionResult) throws {
         try saveResult(result, record: record)
         record.status = "complete"
+        record.error = nil
+        record.transcribedModel = record.model
+        record.generatedTitle = RecordingRecord.suggestedTitle(from: result.text)
         record.requestMilliseconds = result.milliseconds
         record.requestID = result.requestID
         try save(record)

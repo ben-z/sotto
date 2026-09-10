@@ -126,7 +126,7 @@ scripts/launch.sh
 
 Development builds are ad-hoc signed, so rebuilding can require permission reapproval. Set `SOTTO_SIGNING_IDENTITY` to an existing signing identity for consistent signing across builds.
 
-An experimental iPhone/iPad app shares the core. Open `iOS/Sotto.xcodeproj` in Xcode; it requires iOS 17+ and still needs device testing.
+An experimental [iPhone/iPad voice-note app](iOS/README.md) shares the core. It saves audio locally, queues Groq transcription, and retains editable notes. It requires iOS 17+ and still needs device testing.
 
 Successful [CI runs](https://github.com/ben-z/sotto/actions/workflows/ci.yml?query=branch%3Amain) also provide **Sotto-app-ARM64** and **Sotto-app-X64** development artifacts. These require GitHub sign-in; public release downloads do not.
 
