@@ -43,6 +43,8 @@ final class DiagnosticsView: NSView {
         let keyButtons = row([check, getKey, deleteKey])
         let axButton = NSButton(title: "Open Accessibility Settings…", target: self, action: #selector(openAccessibility))
         axButton.toolTip = "Enable Sotto in Privacy & Security > Accessibility."
+        let revealApp = NSButton(title: "Show Sotto in Finder", target: self, action: #selector(showRunningApp))
+        revealApp.toolTip = Bundle.main.bundleURL.path
         let refreshButton = NSButton(title: "Refresh Status", target: self, action: #selector(refresh))
         let stack = NSStackView(views: [
             issue, readiness, separator(), heading("Groq connection"), keyStatus,
@@ -50,8 +52,8 @@ final class DiagnosticsView: NSView {
             keyEntry, connection, keyButtons,
             note("Audio goes directly to Groq using your account. All recordings stay in your chosen folder."),
             note("Connection check verifies authentication and the selected model listing. It does not record audio or test transcription/quota."),
-            separator(), heading("Permissions"), microphone, micAction, accessibility, axButton,
-            note("If auto-paste still fails after enabling Sotto, remove its entry with −, add the current app again with +, then restart Sotto. This can be needed after development builds."),
+            separator(), heading("Permissions"), microphone, micAction, accessibility, row([axButton, revealApp]),
+            note("Drag the selected Sotto app from Finder into the Accessibility list, then enable it. If an existing entry does not work, remove it with − before adding this copy again, then restart Sotto."),
             separator(), refreshButton
         ])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
@@ -264,6 +266,9 @@ final class DiagnosticsView: NSView {
                 self?.refresh()
             }
         } else { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
+    }
+    @objc private func showRunningApp() {
+        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
     }
     @objc private func openAccessibility() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
