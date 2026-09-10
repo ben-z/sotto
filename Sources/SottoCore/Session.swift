@@ -12,6 +12,7 @@ public final class Session: ObservableObject {
     public let configuration: Configuration
     public let archive: Archive
     private let recorder = Recorder()
+    public var activeRecordingID: String? { record?.id }
     private var record: RecordingRecord?
     private var upload: Task<TranscriptionResult, Error>?
     private var deadline: Task<Void, Never>?

@@ -1,7 +1,6 @@
 import AVFoundation
 import Combine
 import CoreLocation
-import Network
 import OSLog
 import SottoCore
 import UIKit
@@ -38,7 +37,6 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     private var player: AVAudioPlayer?
     private var worker: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
-    private let network = NWPathMonitor()
     private var scopedFolder: URL?
     private let bookmarkURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Sotto/folder.bookmark")
     var model: String { UserDefaults.standard.string(forKey: "notes.model") ?? "whisper-large-v3-turbo" }
@@ -55,11 +53,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         recorder.onUnexpectedStop = { [weak self] message in
             self?.finish(recordingError: message)
         }
-        network.pathUpdateHandler = { [weak self] path in
-            guard path.status == .satisfied else { return }
-            Task { @MainActor in self?.resume() }
-        }
-        network.start(queue: DispatchQueue(label: "dev.sotto.notes.network"))
+
     }
 
     func loadLibrary() {
@@ -127,23 +121,25 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         do {
             try library.finishRecording(note, recordingError: recordingError, stop: { try recorder.stop() })
             log.notice("Saved audio \(note.id, privacy: .public)")
-            resume()
+            process([note.id])
         } catch { self.error = error.localizedDescription }
     }
 
-    func resume() {
-        guard worker == nil, let library, keyStored, UIApplication.shared.applicationState == .active else { return }
+    func process(_ ids: Set<String>) {
+        guard let library else { return }
+        guard worker == nil else { error = "Audio saved. Wait for the current transcription, then select Transcribe."; return }
+        guard keyStored else { error = "Audio saved. Add a Groq key in Settings, then select Transcribe."; return }
+        guard UIApplication.shared.applicationState == .active else { error = "Audio saved. Open the note and select Transcribe."; return }
         worker = Task { [weak self] in
-            await library.process(key: { try GroqKeychain.read() }) { url, key, note in
+            await library.process(ids: ids, key: { try GroqKeychain.read() }) { url, key, note in
                 try await GroqClient().transcribe(file: url, key: key, model: note.model, language: note.language, prompt: note.prompt)
             }
             self?.worker = nil
-            if Task.isCancelled { self?.resume() }
         }
     }
 
     func suspend() {
-        // Active recording uses the audio background mode; uploads resume on foreground.
+        // Active recording continues in the background; cancelled uploads require retry.
         stopPlayback(); worker?.cancel()
     }
 
@@ -158,7 +154,6 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
             try bookmark.write(to: bookmarkURL, options: .atomic)
             scopedFolder?.stopAccessingSecurityScopedResource(); scopedFolder = url
             library = replacement; error = nil
-            resume()
         } catch { url.stopAccessingSecurityScopedResource(); throw error }
     }
 
@@ -167,9 +162,10 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     }
 
     func transcribe(_ ids: Set<String>, model: String, language: String?) throws {
+        guard worker == nil else { throw SottoError("Wait for the current transcription to finish.") }
         guard keyStored, let library else { throw SottoError("Add a Groq API key in Settings first.") }
         try library.transcribe(ids, model: model, language: language)
-        resume()
+        process(ids)
     }
 
     func delete(_ ids: Set<String>) throws {

@@ -2,7 +2,7 @@
 
 An experimental native iPhone/iPad app for recording thoughts and turning them into notes. iOS 17 or later.
 
-Audio is saved locally before transcription. Add your Groq API key in Settings to process queued recordings. Notes remain usable without a key or connection: you can play audio, add a title, write text, and share the recording. Transcriptions run one at a time while the app is open. Offline work stays queued; rejected requests show an error and can be retried.
+Audio is saved locally before transcription. Add your Groq API key in Settings, then select saved recordings to transcribe. Notes remain usable without a key or connection: you can play audio, add a title, write text, and share the recording. Transcriptions run one at a time while the app is open. Each request is attempted once. Network errors and cancelled uploads retain the audio and show an error; select Transcribe to retry. Returning to the app or reconnecting does not retry failed requests.
 
 Language selection in Settings and the transcription sheet includes the full [Whisper language list](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py), searchable by language name, native name, or API code. English is the default; **Detect automatically** leaves the language unspecified.
 

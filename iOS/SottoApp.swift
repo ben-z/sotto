@@ -20,7 +20,6 @@ struct SottoNotesApp: App {
                 }
             }
             .onChange(of: phase) { _, value in
-                if value == .active { store.resume() }
                 if value == .background { store.suspend() }
             }
         }

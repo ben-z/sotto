@@ -18,25 +18,37 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     queued.status = "transcribing"; try library.save(queued)
     let interrupted = try library.create(model: "whisper-large-v3", language: nil)
     let restored = try NoteLibrary(directory: directory)
-    #expect(restored.notes.first { $0.id == queued.id }?.status == "queued")
+    #expect(restored.notes.first { $0.id == queued.id }?.status == "failed")
     #expect(restored.notes.first { $0.id == interrupted.id }?.status == "interrupted")
     #expect(try Data(contentsOf: restored.archive.audioURL(queued)) == Data([1, 2, 3]))
 }
 
-@MainActor @Test func missingKeyAndOfflineKeepAudioQueued() async throws {
+@MainActor @Test func networkFailureRequiresExplicitRetry() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let library = try NoteLibrary(directory: directory)
     let note = try queuedNote(library)
-    await library.process(key: { throw SottoError("Add a key") }) { _, _, _ in
-        Issue.record("Must not upload without a key")
-        throw SottoError("Unexpected upload")
+    var calls = 0
+    await library.process(key: { "fixture" }) { _, _, _ in
+        calls += 1
+        throw URLError(.networkConnectionLost)
     }
-    #expect(library.notes.first?.status == "queued")
-    #expect(library.issue == "Add a key")
-    await library.process(key: { "fixture" }) { _, _, _ in throw URLError(.notConnectedToInternet) }
-    #expect(library.notes.first?.status == "queued")
-    #expect(FileManager.default.fileExists(atPath: library.archive.audioURL(note).path))
+    #expect(library.notes.first?.status == "failed")
+    #expect(library.issue != nil)
+    let restored = try NoteLibrary(directory: directory)
+    await restored.process(key: { "fixture" }) { _, _, _ in
+        calls += 1
+        throw SottoError("Unexpected retry")
+    }
+    #expect(calls == 1)
+    try restored.transcribe([note.id], model: note.model, language: note.language)
+    await restored.process(key: { "fixture" }) { _, _, _ in
+        calls += 1
+        return TranscriptionResult(text: "Recovered", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
+    }
+    #expect(calls == 2)
+    #expect(restored.notes.first?.status == "complete")
+    #expect(try Data(contentsOf: library.archive.audioURL(note)) == Data([1, 2, 3]))
 }
 
 @MainActor @Test func queueIncludesNewNotesAndPreservesEditsDuringUpload() async throws {
@@ -107,7 +119,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(library.notes.first?.durationSeconds == 5)
 }
 
-@MainActor @Test func cancelledUploadReturnsToDurableQueue() async throws {
+@MainActor @Test func cancelledUploadRequiresExplicitRetry() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let library = try NoteLibrary(directory: directory)
@@ -123,10 +135,10 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     for await _ in started { break }
     task.cancel()
     await task.value
-    #expect(library.notes.first?.status == "queued")
-    #expect(library.notes.first?.error == nil)
+    #expect(library.notes.first?.status == "failed")
+    #expect(library.notes.first?.error != nil)
     #expect(library.transcribingID == nil)
-    #expect(try NoteLibrary(directory: directory).notes.first?.status == "queued")
+    #expect(try NoteLibrary(directory: directory).notes.first?.status == "failed")
 }
 
 @MainActor @Test func unreadableMetadataIdentifiesTheFile() throws {
@@ -283,4 +295,41 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     try FileManager.default.removeItem(at: metadata)
     try library.transcribe([note.id], model: "fixture", language: "en")
     #expect(try NoteLibrary(directory: directory).notes[0].status == "queued")
+}
+
+@MainActor @Test func explicitSelectionLeavesOtherSavedAudioUntouched() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let first = try queuedNote(library)
+    let second = try queuedNote(library)
+    await library.process(ids: [second.id], key: { "fixture" }) { _, _, note in
+        #expect(note.id == second.id)
+        return TranscriptionResult(text: "Selected", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
+    }
+    #expect(library.notes.first { $0.id == first.id }?.status == "queued")
+    #expect(library.notes.first { $0.id == second.id }?.status == "complete")
+}
+
+@MainActor @Test func historyRecoveryPreservesActiveRecording() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let stale = try library.create(model: "whisper-large-v3", language: "en")
+    let active = try library.create(model: "whisper-large-v3", language: "en")
+    try library.reload(recover: true, excluding: [active.id])
+    #expect(library.notes.first { $0.id == active.id }?.status == "recording")
+    #expect(library.notes.first { $0.id == stale.id }?.status == "interrupted")
+}
+
+@MainActor @Test func asynchronousHistoryReadsExistingArchive() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = try NoteLibrary(directory: directory)
+    let note = try queuedNote(source)
+    let history = NoteLibrary(archive: source.archive)
+    #expect(history.notes.isEmpty)
+    try await history.reloadAsync()
+    #expect(history.notes.map(\.id) == [note.id])
+    #expect(history.notes.first?.status == "queued")
 }

@@ -11,12 +11,36 @@ public final class NoteLibrary: ObservableObject {
     public let archive: Archive
     private let log = Logger(subsystem: "dev.sotto.notes", category: "queue")
 
-    public init(directory: URL) throws {
-        archive = try Archive(directory: directory)
+    public init(archive: Archive) { self.archive = archive }
+
+    public convenience init(directory: URL) throws {
+        self.init(archive: try Archive(directory: directory))
         try reload(recover: true)
     }
 
-    public func reload(recover: Bool = false) throws {
+    public func reload(recover: Bool = false, excluding activeIDs: Set<String> = []) throws {
+        notes = try Self.readRecords(archive: archive)
+        if recover { try recoverInterrupted(excluding: activeIDs) }
+    }
+
+    public func reloadAsync() async throws {
+        let archive = archive
+        notes = try await Task.detached {
+            try Self.readRecords(archive: archive)
+        }.value
+    }
+
+    public func recoverInterrupted(excluding activeIDs: Set<String>) throws {
+        for index in notes.indices where !activeIDs.contains(notes[index].id) {
+            if notes[index].status == "recording" || notes[index].status == "transcribing" {
+                notes[index].status = notes[index].status == "recording" ? "interrupted" : "failed"
+                notes[index].error = "This operation was interrupted. Original audio is retained; select Transcribe to try again."
+                try archive.save(notes[index])
+            }
+        }
+    }
+
+    nonisolated private static func readRecords(archive: Archive) throws -> [RecordingRecord] {
         let files = try FileManager.default.contentsOfDirectory(at: archive.directory, includingPropertiesForKeys: nil)
         var records: [RecordingRecord] = []
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
@@ -26,12 +50,6 @@ public final class NoteLibrary: ObservableObject {
             catch { throw SottoError("Cannot read \(url.lastPathComponent): \(error.localizedDescription)") }
             guard note.id == url.deletingPathExtension().lastPathComponent,
                   note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata in \(url.lastPathComponent)") }
-            if recover && note.status == "transcribing" { note.status = "queued"; try archive.save(note) }
-            if recover && note.status == "recording" {
-                note.status = "interrupted"
-                note.error = "Recording was interrupted. The retained audio may be incomplete."
-                try archive.save(note)
-            }
             if note.generatedTitle == nil && note.status == "complete" {
                 let transcript = archive.directory.appendingPathComponent("\(note.id).txt")
                 if FileManager.default.fileExists(atPath: transcript.path) {
@@ -40,7 +58,7 @@ public final class NoteLibrary: ObservableObject {
             }
             records.append(note)
         }
-        notes = records.sorted { $0.startedAt > $1.startedAt }
+        return records.sorted { $0.startedAt > $1.startedAt }
     }
 
     public func create(model: String, language: String?) throws -> RecordingRecord {
@@ -52,7 +70,8 @@ public final class NoteLibrary: ObservableObject {
     public func save(_ note: RecordingRecord) throws {
         try archive.save(note)
         log.notice("Note \(note.id, privacy: .public): \(note.status, privacy: .public)")
-        try reload()
+        if let index = notes.firstIndex(where: { $0.id == note.id }) { notes[index] = note }
+        else { notes.append(note); notes.sort { $0.startedAt > $1.startedAt } }
     }
 
     public func queue(_ note: RecordingRecord, duration: Double? = nil) throws {
@@ -143,12 +162,12 @@ public final class NoteLibrary: ObservableObject {
         try save(note)
     }
 
-    /// Sequential uploads; interrupted/offline work remains queued for the next opportunity.
-    public func process(key: () throws -> String,
+    /// Each queued request is attempted once. Failed attempts require explicit selection.
+    public func process(ids: Set<String>? = nil, key: () throws -> String,
                         transcribe: (URL, String, RecordingRecord) async throws -> TranscriptionResult) async {
         guard transcribingID == nil else { return }
         issue = nil
-        while let candidate = notes.reversed().first(where: { $0.status == "queued" }) {
+        while let candidate = notes.reversed().first(where: { $0.status == "queued" && (ids == nil || ids!.contains($0.id)) }) {
             if Task.isCancelled { return }
             var note = candidate
             var completed = false
@@ -164,17 +183,19 @@ public final class NoteLibrary: ObservableObject {
                 try archive.complete(&note, with: result)
                 completed = true
                 log.notice("Note \(note.id, privacy: .public): complete")
-                try reload()
+                guard let index = notes.firstIndex(where: { $0.id == note.id }) else {
+                    throw SottoError("The transcribed recording is no longer in the note list.")
+                }
+                notes[index] = note
             } catch {
                 if completed {
                     issue = "Transcription was saved, but the note list could not refresh: \(error.localizedDescription)"
                     transcribingID = nil
                     return
                 }
-                let offline = (error as? URLError).map { [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost].contains($0.code) } ?? false
                 note = notes.first { $0.id == candidate.id } ?? note
-                note.status = Task.isCancelled || offline || transcribingID == nil ? "queued" : "failed"
-                note.error = Task.isCancelled ? nil : error.localizedDescription
+                note.status = "failed"
+                note.error = Task.isCancelled ? "Transcription was cancelled. Retry when ready." : error.localizedDescription
                 do { try save(note) } catch { issue = "Could not save transcription status: \(error.localizedDescription)" }
                 if !Task.isCancelled && issue == nil { issue = note.error }
                 transcribingID = nil

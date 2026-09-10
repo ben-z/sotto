@@ -20,7 +20,13 @@ Your key is stored in macOS Keychain. Audio goes directly to Groq using your acc
 
 > **First launch:** current releases are ad-hoc signed, not Apple-notarized. If macOS blocks the app, attempt to open it, then use **System Settings → Privacy & Security → Open Anyway** if you trust the download. See [Apple’s instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
-### iPhone and iPad
+### Recordings
+
+Choose **Recordings…** in the menu to browse saved audio, play it, rename recordings, edit notes, or select several recordings to transcribe or delete. The window uses your configured recording folder, including existing recordings. Deletion requires confirmation.
+
+Transcription failures retain the original audio and error. Retry explicitly from the recordings window; requests are not retried after reconnecting. History transcriptions save their results without auto-pasting. Retranscription replaces machine output while preserving edited notes.
+
+## iPhone and iPad
 
 [Download Sotto-unsigned.ipa](https://github.com/ben-z/sotto/releases/latest/download/Sotto-unsigned.ipa) for **iOS 17+**. Sign and install it with your sideloading tool, then add your Groq key in Settings. The IPA is unsigned and cannot be installed directly from Safari.
 

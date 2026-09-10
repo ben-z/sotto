@@ -6,6 +6,7 @@ import SottoCore
 @MainActor
 final class Agent: NSObject, NSApplicationDelegate {
     private(set) var session: Session
+    private var recordingsWindow: RecordingsWindow?
     private var settingsWindow: SettingsWindow?
     private let updates = UpdateChecker()
     private var hotkey: Hotkey?
@@ -35,6 +36,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
         let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "Recordings…", action: #selector(openRecordings), keyEquivalent: "1").target = self
         fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
         fileItem.submenu = fileMenu
@@ -93,7 +95,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         menu.autoenablesItems = false
         statusLine.isEnabled = false
         menu.addItem(statusLine)
-        for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Copy Last Transcript", #selector(copyLastTranscript)), ("Open Recordings", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("Quit Sotto", #selector(quit))] {
+        for (title, action) in [("Start / Stop", #selector(toggle)), ("Cancel (keep audio)", #selector(cancel)), ("Copy Last Transcript", #selector(copyLastTranscript)), ("Recordings…", #selector(openRecordings)), ("Settings…", #selector(editConfig)), ("Quit Sotto", #selector(quit))] {
             if action == #selector(copyLastTranscript) || action == #selector(editConfig) {
                 menu.addItem(.separator())
             }
@@ -115,6 +117,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     @objc func toggle() {
+        guard recordingsWindow?.busy != true else { NSSound.beep(); return }
         if session.state == .recording || session.state == .preparing { Task { await session.finish() }; return }
         guard session.state != .transcribing else { NSSound.beep(); return }
         do {
@@ -143,7 +146,15 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     @objc func cancel() { Task { await session.cancel() } }
-    @objc func openRecordings() { NSWorkspace.shared.open(session.archive.directory) }
+    @objc func openRecordings() {
+        do {
+            if recordingsWindow == nil {
+                recordingsWindow = try RecordingsWindow(session: session, onClose: { [weak self] in self?.recordingsWindow = nil })
+            }
+            recordingsWindow?.refresh()
+            recordingsWindow?.present()
+        } catch { session.fail(error) }
+    }
     @objc func editConfig() {
         if settingsWindow == nil {
             settingsWindow = SettingsWindow(configuration: session.configuration, configurationURL: Paths.config, updates: updates, onSave: { [weak self] config in
@@ -154,7 +165,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         settingsWindow?.present(showStatus: session.state == .error, error: session.state == .error ? session.message : nil)
     }
     private func applyConfiguration(_ config: Configuration) throws {
-        guard session.state == .idle || session.state == .error else {
+        guard recordingsWindow?.busy != true, session.state == .idle || session.state == .error else {
             throw SottoError("Finish the current recording/transcription before saving settings.")
         }
         guard try Configuration.load(from: Paths.config) == session.configuration else {
@@ -174,6 +185,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         do { try config.save(to: Paths.config) }
         catch { newHotkey?.stop(); throw error }
         if let newHotkey { hotkey?.stop(); hotkey = newHotkey }
+        recordingsWindow?.close()
         session = replacement
         updates.configure(automatic: config.automaticUpdateChecks)
         AppLog.shared.record("Settings saved")
@@ -187,6 +199,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     @objc func quit() {
+        guard recordingsWindow?.busy != true else { recordingsWindow?.present(); NSSound.beep(); return }
         Task {
             await session.cancel()
             // Let an in-flight cancelled upload persist its final metadata.
@@ -204,7 +217,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         case .preparing: statusLine.title = "Preparing microphone…"
         case .recording: statusLine.title = "Recording…"
         case .transcribing: statusLine.title = "Transcribing…"
-        case .error: statusLine.title = "Needs attention · open Settings"
+        case .error: statusLine.title = "Needs attention"
         }
         statusLine.isHidden = state == .idle || state == .recording
         statusLine.toolTip = session.message
@@ -216,6 +229,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     private func update() {
+        recordingsWindow?.refresh()
         if let item {
             artwork?.apply(SottoStatusArtwork.State(rawValue: session.state.rawValue)!, to: item)
             item.button?.imagePosition = .imageLeading
@@ -231,7 +245,8 @@ final class Agent: NSObject, NSApplicationDelegate {
         catch { AppLog.shared.record("Cannot save status: \(error.localizedDescription)", error: true) }
         if session.state == .error {
             NSSound.beep()
-            editConfig()
+            if session.activeRecordingID != nil { openRecordings() }
+            else { editConfig() }
         }
     }
 

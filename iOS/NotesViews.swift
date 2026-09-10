@@ -12,7 +12,7 @@ private func timestamp(_ note: RecordingRecord) -> String {
 private func status(_ note: RecordingRecord, keyStored: Bool) -> String {
     switch note.status {
     case "recording": "Recording"
-    case "queued": keyStored ? "Waiting to transcribe" : "Audio saved · Add a Groq key to transcribe"
+    case "queued": keyStored ? "Audio saved · Select Transcribe" : "Audio saved · Add a Groq key to transcribe"
     case "transcribing": "Transcribing"
     case "complete": "Transcribed"
     case "interrupted": "Recording interrupted"
@@ -51,12 +51,7 @@ struct NotesView: View {
                     NavigationLink {
                         NoteView(store: store, library: library, id: note.id)
                     } label: {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(note.displayTitle).font(.headline).lineLimit(2)
-                            Text(timestamp(note)).font(.subheadline).foregroundStyle(.secondary)
-                            Label(status(note, keyStored: store.keyStored), systemImage: note.status == "complete" ? "text.alignleft" : "waveform")
-                                .font(.caption).foregroundStyle(note.status == "recording" ? .red : .secondary)
-                        }.padding(.vertical, 5)
+                        RecordingSummary(note: note)
                     }
                     .accessibilityIdentifier("note-\(note.id)")
                     .tag(note.id)
@@ -354,7 +349,7 @@ struct SettingsView: View {
                             defer { checking = false }
                             do {
                                 try await GroqClient().verifyKey(candidate, model: model)
-                                try GroqKeychain.save(candidate); key = ""; store.refreshKey(); store.resume()
+                                try GroqKeychain.save(candidate); key = ""; store.refreshKey()
                                 keyResult = .success("Key verified and saved. Queued recordings will transcribe automatically.")
                             } catch { keyResult = .failure(error) }
                         }
