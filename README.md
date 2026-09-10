@@ -20,6 +20,12 @@ Your key is stored in macOS Keychain. Audio goes directly to Groq using your acc
 
 > **First launch:** current releases are ad-hoc signed, not Apple-notarized. If macOS blocks the app, attempt to open it, then use **System Settings → Privacy & Security → Open Anyway** if you trust the download. See [Apple’s instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
+### iPhone and iPad
+
+[Download Sotto-unsigned.ipa](https://github.com/ben-z/sotto/releases/latest/download/Sotto-unsigned.ipa) for **iOS 17+**. Sign and install it with your sideloading tool, then add your Groq key in Settings. The IPA is unsigned and cannot be installed directly from Safari.
+
+Recordings stay in your chosen local folder. Edit titles and notes, retranscribe with a different model or language, and select several recordings to transcribe or delete. The **Record a voice note** shortcut works with the iPhone Action Button. See the [iOS guide](iOS/README.md) for setup, storage, and recording behavior.
+
 ## Record a thought
 
 Place the cursor where you want the text, **hold Control + Command + S**, speak, then release. Sotto transcribes in English by default and pastes into the active app. Keep that app in front while transcription finishes; if focus changes, your text stays on the clipboard for manual paste.
@@ -126,7 +132,7 @@ scripts/launch.sh
 
 Development builds are ad-hoc signed, so rebuilding can require permission reapproval. Set `SOTTO_SIGNING_IDENTITY` to an existing signing identity for consistent signing across builds.
 
-An experimental [iPhone/iPad voice-note app](iOS/README.md) shares the core. It saves audio locally, queues Groq transcription, and retains editable notes. It requires iOS 17+ and still needs device testing.
+The [iPhone/iPad voice-note app](iOS/README.md) shares the core. Open `iOS/Sotto.xcodeproj` to build it in Xcode. CI tests recording, editing, location capture, and recovery on an iPhone simulator.
 
 Successful [CI runs](https://github.com/ben-z/sotto/actions/workflows/ci.yml?query=branch%3Amain) also provide **Sotto-app-ARM64** and **Sotto-app-X64** development artifacts. These require GitHub sign-in; public release downloads do not.
 
@@ -134,4 +140,4 @@ See [validation notes](VALIDATION.md) for measured results and limitations, and 
 
 ## Releases
 
-The [latest release](https://github.com/ben-z/sotto/releases/latest) has the current version. Publishing a new GitHub release automatically runs checks, builds a universal app, and attaches its ZIP and checksum. Personal-use releases need no Apple credentials. Developer ID signing and notarization can be enabled explicitly later; see [RELEASING.md](RELEASING.md).
+The [latest release](https://github.com/ben-z/sotto/releases/latest) includes the universal macOS ZIP and `Sotto-unsigned.ipa`, each with a checksum. Publishing a release automatically tests and builds both platforms from its tag. CI packaging needs no Apple credentials; the iOS IPA requires signing before installation. Developer ID signing and notarization for macOS can be enabled explicitly; see [RELEASING.md](RELEASING.md).
