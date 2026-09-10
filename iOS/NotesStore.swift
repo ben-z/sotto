@@ -149,6 +149,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func selectFolder(_ url: URL) throws {
         guard recording == nil, !preparing, worker == nil else { throw SottoError("Finish recording and transcription before changing folders.") }
+        guard locationRequests.isEmpty else { throw SottoError("Wait for recording location capture to finish before changing folders.") }
         guard url.startAccessingSecurityScopedResource() else { throw SottoError("Cannot access the chosen folder.") }
         do {
             let replacement = try NoteLibrary(directory: url)

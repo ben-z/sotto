@@ -26,9 +26,12 @@ jobs:
         run: |
           set -euo pipefail
           test -d "$DEVELOPER_DIR"
+          version=$(cat VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'VERSION must have three numeric components' >&2; exit 1; }
           xcodebuild -project iOS/Sotto.xcodeproj -scheme Sotto \
             -configuration Release -destination 'generic/platform=iOS' \
-            -derivedDataPath work/ios-release CODE_SIGNING_ALLOWED=NO build
+            -derivedDataPath work/ios-release CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" build
       - name: Package and verify unsigned IPA
         run: |
           set -euo pipefail
@@ -37,6 +40,8 @@ jobs:
           app=work/ipa/Payload/Sotto.app
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = dev.sotto.notes
           test "$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$app/Info.plist")" = iphoneos
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")" = "$(cat VERSION)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")" = "$GITHUB_RUN_NUMBER"
           lipo "$app/Sotto" -verify_arch arm64
           test ! -e "$app/embedded.mobileprovision"
           test ! -d "$app/_CodeSignature"
