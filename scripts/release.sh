@@ -42,5 +42,5 @@ temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 ditto -x -k "$archive" "$temporary"
 python3 scripts/check-bundle.py "$temporary/Sotto.app" --universal
-(cd .build/distribution && shasum -a 256 "${archive:t}" > SHA256SUMS)
+(cd .build/distribution && shasum -a 256 "${archive:t}" > "${archive:t}.sha256")
 print "Release files: $archive"

@@ -146,4 +146,4 @@ See [validation notes](VALIDATION.md) for measured results and limitations, and 
 
 ## Releases
 
-The [latest release](https://github.com/ben-z/sotto/releases/latest) includes the universal macOS ZIP and `Sotto-unsigned.ipa`, each with a checksum. Publishing a release automatically tests and builds both platforms from its tag. CI packaging needs no Apple credentials; the iOS IPA requires signing before installation. Developer ID signing and notarization for macOS can be enabled explicitly; see [RELEASING.md](RELEASING.md).
+The [latest release](https://github.com/ben-z/sotto/releases/latest) includes the universal macOS ZIP and `Sotto-unsigned.ipa`, each with a matching `.sha256` checksum file. Publishing a release automatically tests and builds both platforms from its tag. CI packaging needs no Apple credentials; the iOS IPA requires signing before installation. Developer ID signing and notarization for macOS can be enabled explicitly; see [RELEASING.md](RELEASING.md).
