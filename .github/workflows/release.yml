@@ -89,8 +89,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          archive=".build/distribution/Sotto-$(cat VERSION)-macOS-universal.zip"
           gh release upload "$RELEASE_TAG" \
-            ".build/distribution/Sotto-$(cat VERSION)-macOS-universal.zip" .build/distribution/SHA256SUMS \
+            "$archive" "$archive.sha256" \
             work/ipa/Sotto-unsigned.ipa work/ipa/Sotto-unsigned.ipa.sha256
       - name: Remove signing material
         if: always()

@@ -13,7 +13,7 @@ gh release create "v$version" --target main --title "Sotto v$version" --notes-fi
 
 The **published release** event runs tests and resource checks on Apple Silicon and Intel, plus core and iOS simulator tests. It builds and verifies both apps from the release tag, then attaches these files:
 
-- `Sotto-<version>-macOS-universal.zip` and `SHA256SUMS`.
+- `Sotto-<version>-macOS-universal.zip` and its matching `.zip.sha256` file.
 - `Sotto-unsigned.ipa` and `Sotto-unsigned.ipa.sha256`.
 
 The IPA targets physical iPhones and iPads. CI verifies its version, platform, architecture, archive integrity, and checksum. It requires signing and provisioning through a sideloading tool before installation.
