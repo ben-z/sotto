@@ -18,6 +18,13 @@ struct ChunkTranscript: Decodable {
     }
 
     func slice(_ indices: Range<Int>, following previous: Character? = nil) throws -> String {
+        let selected = try selectedText(indices, following: previous)
+        // Reconcile every selected boundary, including complete responses and
+        // slices beginning at word zero. Keep the preceding separator if present.
+        return previous?.isWhitespace == true ? String(selected.drop(while: \.isWhitespace)) : selected
+    }
+
+    private func selectedText(_ indices: Range<Int>, following previous: Character?) throws -> String {
         try validate()
         guard let words, !words.isEmpty else { return text }
         guard !indices.isEmpty else { return "" }

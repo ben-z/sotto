@@ -168,6 +168,22 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
                 }
             }
         }
+        // The same whitespace rule must hold for a whole response, a prefix,
+        // and a slice whose preceding context was removed.
+        for first in [0, 1] {
+            for prefix in ["", " ", "\t", "\n"] {
+                for previous: Character? in [nil, "x", " ", "\n"] {
+                    let words: [ChunkTranscript.Word] = (first == 0 ? [] : [.init(word: "context", start: 0, end: 0.5)])
+                        + [.init(word: "word", start: 1, end: 2), .init(word: "tail", start: 2, end: 3)]
+                    let source = ChunkTranscript(text: (first == 0 ? "" : "context") + prefix + "word tail", words: words)
+                    for end in [first + 1, words.count] {
+                        let gap = previous?.isWhitespace == true || (first > 0 && previous == nil) ? "" : prefix
+                        let expected = gap + (end == words.count ? "word tail" : "word ")
+                        try expect(try source.slice(first..<end, following: previous) == expected, "Boundary whitespace depends on slice position")
+                    }
+                }
+            }
+        }
         var missingMetadata = ChunkTranscriptMerger()
         do {
             try missingMetadata.append(ChunkTranscript(text: "Missing metadata", words: nil), segment: left)
@@ -205,7 +221,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         UploadFixture.reset()
         let result = try await transcribe(source)
         try expect(UploadFixture.count == 2, "Expected two uploads")
-        try expect(result.text == "Part 1.  Part 2.", "Transcript order or trimming changed")
+        try expect(result.text == "Part 1. Part 2.", "Transcript order or trimming changed")
         let raw = try JSONSerialization.jsonObject(with: result.rawResponse) as! [String: Any]
         let responses = raw["chunks"] as! [[String: Any]]
         try expect(responses.count == 2 && responses[1]["start_seconds"] as? Double == 598, "Missing chunk offsets")
@@ -262,6 +278,26 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
             })
             let joined = try await transcribe(source)
             try expect(UploadFixture.count == 2 && joined.text == expected, "Asymmetric overlap lost or duplicated boundary whitespace")
+        }
+
+        // No alignable context and an already-owned first word: both responses
+        // can supply whitespace, but the join must retain only one separator.
+        for (first, second, expected) in [
+            ("Hello ", " world", "Hello world"),
+            ("Hello\n", " world", "Hello\nworld"),
+            ("Hello", "\nworld", "Hello\nworld"),
+            ("你好", "世界", "你好世界")
+        ] {
+            let payloads = try [(first, 597.5), (second, 1.5)].map { text, midpoint in
+                let payload: [String: Any] = ["text": text, "words": [[
+                    "word": text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    "start": midpoint - 0.1, "end": midpoint + 0.1
+                ]]]
+                return String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
+            }
+            UploadFixture.reset(payloads: payloads)
+            let joined = try await transcribe(source)
+            try expect(joined.text == expected, "First-word slice duplicated or lost boundary whitespace")
         }
 
         // Independent responses can place the same word on opposite sides of
