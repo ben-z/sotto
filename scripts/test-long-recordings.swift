@@ -61,12 +61,15 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         defer { try? FileManager.default.removeItem(at: root) }
         let source = root.appendingPathComponent("source.wav")
         try writeAudio(to: source, seconds: 751) // Exceeds the 24 MB chunking threshold.
-        let originalSize = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize
-        let uploadsBefore = try temporaryUploads()
+        let compressed = try verifyChunking(source: source, directory: root)
+        try await verifyUploads(source: source, compressed: compressed)
+        print("Long recording checks passed: frame continuity, byte limits, sequential uploads, metadata, quota failure, cancellation, and cleanup.")
+    }
 
+    static func verifyChunking(source: URL, directory: URL) throws -> URL {
         // Verify decoded content across every boundary, byte bounds, and final tail.
         let chunks = try AudioChunks(file: source, maximumBytes: 100_096, maximumSeconds: 10)
-        let part = root.appendingPathComponent("part.wav")
+        let part = directory.appendingPathComponent("part.wav")
         var frames: AVAudioFramePosition = 0
         while let range = try chunks.next(to: part) {
             try expect(abs(range.startSeconds - Double(frames) / 16000) < 0.00001, "Chunk offset gap")
@@ -84,7 +87,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try expect(frames == 751 * 16000, "Lost trailing audio")
 
         // Exercise the AAC decoder used by actual Sotto recordings as well as WAV.
-        let compressed = root.appendingPathComponent("short.m4a")
+        let compressed = directory.appendingPathComponent("short.m4a")
         do {
             let input = try AVAudioFile(forReading: source)
             let output = try AVAudioFile(forWriting: compressed, settings: [
@@ -108,7 +111,12 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try expect(try largeLimit.next(to: part) != nil, "Large duration limit rejected valid audio")
         try expect(try AVAudioFile(forReading: part).length == decodedFrames, "Large duration limit lost audio")
         try FileManager.default.removeItem(at: part)
+        return compressed
+    }
 
+    static func verifyUploads(source: URL, compressed: URL) async throws {
+        let originalSize = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        let uploadsBefore = try temporaryUploads()
         let settings = URLSessionConfiguration.ephemeral
         settings.protocolClasses = [UploadFixture.self]
         let client = GroqClient(transcriptionEndpoint: URL(string: "https://sotto.invalid/transcriptions")!, uploadConfiguration: settings)
@@ -167,6 +175,5 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         catch is CancellationError { }
         try expect(UploadFixture.count == 2, "Did not reach second upload before cancellation")
         try expect(try temporaryUploads() == uploadsBefore, "Temporary uploads leaked during cancelled upload")
-        print("Long recording checks passed: frame continuity, byte limits, sequential uploads, metadata, quota failure, cancellation, and cleanup.")
     }
 }

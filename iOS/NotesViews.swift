@@ -204,6 +204,14 @@ struct SettingsView: View {
     @State private var folderError: String?
     @State private var checking = false
     @State private var keyResult: Result<String, Error>?
+
+    private var recordingMinutes: Binding<Int> {
+        Binding(get: { Int(maxRecordingSeconds / 60) }, set: { minutes in
+            let seconds = Double(max(minutes, 1)) * 60
+            maxRecordingSeconds = min(seconds, Configuration.recordingSecondsRange.upperBound)
+        })
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -244,12 +252,10 @@ struct SettingsView: View {
                     }
                 } footer: { Text("Applies to new recordings. Audio is sent to Groq for transcription using your key.") }
                 Section("Recording limit") {
-                    Stepper(value: $maxRecordingSeconds, in: 60...Configuration.recordingSecondsRange.upperBound, step: 60) {
+                    Stepper(value: recordingMinutes, in: 1...Int(Configuration.recordingSecondsRange.upperBound / 60)) {
                         HStack {
                             Text("Maximum")
-                            TextField("Minutes", value: Binding(get: { Int(maxRecordingSeconds / 60) }, set: {
-                                maxRecordingSeconds = Double(min(max($0, 1), 1440)) * 60
-                            }), format: .number)
+                            TextField("Minutes", value: recordingMinutes, format: .number)
                                 .keyboardType(.numberPad).multilineTextAlignment(.trailing)
                                 .accessibilityLabel("Maximum recording duration in minutes")
                             Text("minutes")

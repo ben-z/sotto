@@ -160,10 +160,14 @@ public struct GroqClient: Sendable {
         try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"recording.\(ext)\"\r\nContent-Type: \(mime)\r\n\r\n")
         let input = try FileHandle(forReadingFrom: audio)
         defer { try? input.close() }
-        while let chunk = try input.read(upToCount: 65536), !chunk.isEmpty {
+        // Release Foundation's temporary buffers after each block, before an
+        // entire upload's worth can accumulate on a Swift concurrency thread.
+        while try autoreleasepool(invoking: {
             try Task.checkCancellation()
+            guard let chunk = try input.read(upToCount: 65536), !chunk.isEmpty else { return false }
             try output.write(contentsOf: chunk)
-        }
+            return true
+        }) { }
         try write("\r\n--\(boundary)--\r\n")
     }
 }
