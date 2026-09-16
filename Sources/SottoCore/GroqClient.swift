@@ -63,6 +63,9 @@ public struct GroqClient: Sendable {
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size > 0 else { throw SottoError("Audio must be nonempty; original is retained at \(file.path).") }
         guard !key.isEmpty else { throw SottoError("Groq API key is empty.") }
+        var fields = [("model", model), ("response_format", "verbose_json"), ("temperature", "0")]
+        if let language { fields.append(("language", language)) }
+        if !prompt.isEmpty { fields.append(("prompt", prompt)) }
 
         // All parts share one session. Final timing and whitespace handling apply
         // to the complete transcription, regardless of how many uploads it takes.
@@ -70,7 +73,7 @@ public struct GroqClient: Sendable {
         defer { session.invalidateAndCancel() }
         let start = ContinuousClock.now
         let upload = { (audio: URL) in
-            try await transcribeUpload(file: audio, key: key, model: model, language: language, prompt: prompt, session: session)
+            try await transcribeUpload(file: audio, key: key, fields: fields, session: session)
         }
         let response = if size >= AudioChunks.maximumUploadBytes {
             try await transcribeChunks(file: file, upload: upload)
@@ -112,7 +115,7 @@ public struct GroqClient: Sendable {
         return (text, raw, nil)
     }
 
-    private func transcribeUpload(file: URL, key: String, model: String, language: String?, prompt: String, session: URLSession) async throws -> Response {
+    private func transcribeUpload(file: URL, key: String, fields: [(String, String)], session: URLSession) async throws -> Response {
         try Task.checkCancellation()
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size > 0, size < 25_000_000 else { throw SottoError("Audio upload must be nonempty and below Groq’s 25 MB attachment limit.") }
@@ -121,9 +124,6 @@ public struct GroqClient: Sendable {
         // into RAM. Upload file is deleted on success, failure, or cancellation.
         let body = FileManager.default.temporaryDirectory.appendingPathComponent("\(boundary).multipart")
         defer { try? FileManager.default.removeItem(at: body) }
-        var fields = [("model", model), ("response_format", "verbose_json"), ("temperature", "0")]
-        if let language { fields.append(("language", language)) }
-        if !prompt.isEmpty { fields.append(("prompt", prompt)) }
         try Self.writeMultipart(audio: file, destination: body, boundary: boundary, fields: fields)
         var request = URLRequest(url: transcriptionEndpoint)
         request.httpMethod = "POST"
