@@ -295,9 +295,6 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     @objc private func save() {
         let config = editedConfiguration
         do {
-            guard Configuration.recordingSecondsRange.contains(config.maxRecordingSeconds) else {
-                throw SottoError("Recording limit must be a number between 1 and 86,400 seconds (24 hours).")
-            }
             try saveConfiguration(config); close()
         }
         catch { showError(error.localizedDescription) }

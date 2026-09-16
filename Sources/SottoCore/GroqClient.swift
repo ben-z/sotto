@@ -13,19 +13,20 @@ public struct TranscriptionResult: Sendable {
 }
 
 public struct GroqClient: Sendable {
+    private typealias Response = (text: String, rawResponse: Data, requestID: String?)
     private let transcriptionEndpoint: URL
     private let uploadConfiguration: URLSessionConfiguration
     public init() {
-        transcriptionEndpoint = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
-        uploadConfiguration = .ephemeral
+        self.init(transcriptionEndpoint: URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!)
     }
 
     // Internal test seam: production callers always use Groq's HTTPS endpoint.
     init(transcriptionEndpoint: URL, uploadConfiguration: URLSessionConfiguration = .ephemeral) {
         self.transcriptionEndpoint = transcriptionEndpoint
-        self.uploadConfiguration = uploadConfiguration
+        self.uploadConfiguration = uploadConfiguration.copy() as! URLSessionConfiguration
+        self.uploadConfiguration.timeoutIntervalForRequest = 120
+        self.uploadConfiguration.timeoutIntervalForResource = 180
     }
-
 
     /// Authenticated, read-only check. This does not prove inference quota or
     /// microphone/transcription operation; the UI states that distinction.
@@ -62,14 +63,28 @@ public struct GroqClient: Sendable {
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size > 0 else { throw SottoError("Audio must be nonempty; original is retained at \(file.path).") }
         guard !key.isEmpty else { throw SottoError("Groq API key is empty.") }
-        if size >= AudioChunks.maximumUploadBytes {
-            return try await transcribeChunks(file: file, key: key, model: model, language: language, prompt: prompt, trimWhitespace: trimWhitespace)
+
+        // All parts share one session. Final timing and whitespace handling apply
+        // to the complete transcription, regardless of how many uploads it takes.
+        let session = URLSession(configuration: uploadConfiguration)
+        defer { session.invalidateAndCancel() }
+        let start = ContinuousClock.now
+        let upload = { (audio: URL) in
+            try await transcribeUpload(file: audio, key: key, model: model, language: language, prompt: prompt, session: session)
         }
-        return try await transcribeUpload(file: file, key: key, model: model, language: language, prompt: prompt).trimmingWhitespace(trimWhitespace)
+        let response = if size >= AudioChunks.maximumUploadBytes {
+            try await transcribeChunks(file: file, upload: upload)
+        } else {
+            try await upload(file)
+        }
+        try Task.checkCancellation()
+        let elapsed = start.duration(to: .now).components
+        let milliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
+        return TranscriptionResult(text: response.text, rawResponse: response.rawResponse, milliseconds: milliseconds,
+                                   requestID: response.requestID).trimmingWhitespace(trimWhitespace)
     }
 
-    private func transcribeChunks(file: URL, key: String, model: String, language: String?, prompt: String, trimWhitespace: Bool) async throws -> TranscriptionResult {
-        let start = ContinuousClock.now
+    private func transcribeChunks(file: URL, upload: (URL) async throws -> Response) async throws -> Response {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Sotto-chunks-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -79,7 +94,7 @@ public struct GroqClient: Sendable {
         var responses: [[String: Any]] = []
         while let range = try reader.next(to: chunk) {
             do {
-                let result = try await transcribeUpload(file: chunk, key: key, model: model, language: language, prompt: prompt)
+                let result = try await upload(chunk)
                 texts.append(result.text)
                 var response: [String: Any] = ["start_seconds": range.startSeconds, "duration_seconds": range.durationSeconds,
                     "response": try JSONSerialization.jsonObject(with: result.rawResponse)]
@@ -91,16 +106,13 @@ public struct GroqClient: Sendable {
             }
             try FileManager.default.removeItem(at: chunk)
         }
-        try Task.checkCancellation()
         let text = texts.filter { !$0.isEmpty }.joined(separator: "\n")
         // Preserve each unmodified API response and its offset in a Sotto envelope.
         let raw = try JSONSerialization.data(withJSONObject: ["text": text, "chunks": responses], options: [.sortedKeys])
-        let elapsed = start.duration(to: .now).components
-        let milliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
-        return TranscriptionResult(text: text, rawResponse: raw, milliseconds: milliseconds, requestID: nil).trimmingWhitespace(trimWhitespace)
+        return (text, raw, nil)
     }
 
-    private func transcribeUpload(file: URL, key: String, model: String, language: String?, prompt: String) async throws -> TranscriptionResult {
+    private func transcribeUpload(file: URL, key: String, model: String, language: String?, prompt: String, session: URLSession) async throws -> Response {
         try Task.checkCancellation()
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size > 0, size < 25_000_000 else { throw SottoError("Audio upload must be nonempty and below Groq’s 25 MB attachment limit.") }
@@ -117,12 +129,6 @@ public struct GroqClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let configuration = uploadConfiguration.copy() as! URLSessionConfiguration
-        configuration.timeoutIntervalForRequest = 120
-        configuration.timeoutIntervalForResource = 180
-        let session = URLSession(configuration: configuration)
-        defer { session.invalidateAndCancel() }
-        let start = ContinuousClock.now
         let (data, response) = try await session.upload(for: request, fromFile: body)
         guard let response = response as? HTTPURLResponse else { throw SottoError("Groq returned a non-HTTP response.") }
         guard response.statusCode == 200 else {
@@ -133,11 +139,9 @@ public struct GroqClient: Sendable {
             }
             throw SottoError("Groq HTTP \(response.statusCode): \(detail)")
         }
-        struct Response: Decodable { let text: String }
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
-        let elapsed = start.duration(to: .now).components
-        let milliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
-        return TranscriptionResult(text: decoded.text, rawResponse: data, milliseconds: milliseconds, requestID: response.value(forHTTPHeaderField: "x-request-id"))
+        struct Payload: Decodable { let text: String }
+        let decoded = try JSONDecoder().decode(Payload.self, from: data)
+        return (decoded.text, data, response.value(forHTTPHeaderField: "x-request-id"))
     }
 
     static func writeMultipart(audio: URL, destination: URL, boundary: String, fields: [(String, String)]) throws {

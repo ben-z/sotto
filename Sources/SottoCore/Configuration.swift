@@ -52,8 +52,11 @@ public struct Configuration: Codable, Sendable, Equatable {
         guard ["toggle", "hold"].contains(hotkeyMode), hotkeyModifiers != 0, hotkeyKeyCode <= 127 else {
             throw SottoError("Invalid hotkey configuration. Use toggle/hold, a key code in 0...127, and nonzero Carbon modifier flags.")
         }
-        guard Self.recordingSecondsRange.contains(maxRecordingSeconds), (16000...128000).contains(audioBitRate) else {
-            throw SottoError("Invalid limits: recording 1...86400 seconds (up to 24 hours), bitrate 16000...128000.")
+        guard Self.recordingSecondsRange.contains(maxRecordingSeconds) else {
+            throw SottoError("Recording limit must be a number between 1 and 86,400 seconds (24 hours).")
+        }
+        guard (16000...128000).contains(audioBitRate) else {
+            throw SottoError("Audio bitrate must be between 16,000 and 128,000.")
         }
         if let language, language.count != 2 || !language.allSatisfy({ $0.isASCII && $0.isLowercase }) {
             throw SottoError("language must be a two-letter lowercase ISO code, or null for detection.")

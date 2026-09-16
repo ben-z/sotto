@@ -7,6 +7,7 @@ final class AudioChunks {
     static let maximumUploadBytes = 24_000_000 // Headroom below Groq's 25 MB attachment limit.
     private let input: AVAudioFile
     private let framesPerChunk: AVAudioFramePosition
+    private let buffer: AVAudioPCMBuffer
 
     init(file: URL, maximumBytes: Int = maximumUploadBytes, maximumSeconds: Double = 600) throws {
         input = try AVAudioFile(forReading: file)
@@ -19,6 +20,10 @@ final class AudioChunks {
         framesPerChunk = min(AVAudioFramePosition((maximumBytes - 8192) / bytesPerFrame),
                              AVAudioFramePosition(maximumSeconds * format.sampleRate))
         guard input.length > 0, framesPerChunk > 0 else { throw SottoError("Audio contains no readable frames.") }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_384) else {
+            throw SottoError("Could not allocate an audio chunk buffer.")
+        }
+        self.buffer = buffer
     }
 
     /// Contiguous frame ranges preserve all audio, including the final partial chunk.
@@ -37,16 +42,12 @@ final class AudioChunks {
             AVLinearPCMIsBigEndianKey: false,
             AVLinearPCMIsNonInterleaved: false
         ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_384) else {
-            throw SottoError("Could not allocate an audio chunk buffer.")
-        }
-        var remaining = count
-        while remaining > 0 {
+        let end = start + count
+        while input.framePosition < end {
             try Task.checkCancellation()
-            try input.read(into: buffer, frameCount: AVAudioFrameCount(min(remaining, AVAudioFramePosition(buffer.frameCapacity))))
+            try input.read(into: buffer, frameCount: AVAudioFrameCount(min(end - input.framePosition, AVAudioFramePosition(buffer.frameCapacity))))
             guard buffer.frameLength > 0 else { throw SottoError("Audio ended before the recording was fully read.") }
             try output.write(from: buffer)
-            remaining -= AVAudioFramePosition(buffer.frameLength)
         }
         return (Double(start) / format.sampleRate, Double(count) / format.sampleRate)
     }

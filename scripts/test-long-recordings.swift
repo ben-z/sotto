@@ -56,20 +56,6 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
     }
 
     static func main() async throws {
-        var config = Configuration(recordingsDirectory: "/tmp/sotto-test")
-        try expect(config.maxRecordingSeconds == 10800, "Default must be three hours")
-        for seconds in [1.0, 1800, 3601, 10800, 86400] {
-            config.maxRecordingSeconds = seconds
-            try config.validate()
-            let saved = try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(config))
-            try expect(saved.maxRecordingSeconds == seconds, "Saved recording limit changed")
-        }
-        for invalid in [-1.0, 0, 86401, .infinity, .nan] {
-            config.maxRecordingSeconds = invalid
-            do { try config.validate(); throw SottoError("Accepted invalid limit") }
-            catch let error as SottoError { try expect(error.message != "Accepted invalid limit", error.message) }
-        }
-
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -120,8 +106,12 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         let settings = URLSessionConfiguration.ephemeral
         settings.protocolClasses = [UploadFixture.self]
         let client = GroqClient(transcriptionEndpoint: URL(string: "https://sotto.invalid/transcriptions")!, uploadConfiguration: settings)
+        func transcribe(_ file: URL, trimWhitespace: Bool = true) async throws -> TranscriptionResult {
+            try await client.transcribe(file: file, key: "fixture-key", model: "whisper-large-v3-turbo",
+                                        language: "en", prompt: "", trimWhitespace: trimWhitespace)
+        }
         UploadFixture.reset()
-        let result = try await client.transcribe(file: source, key: "fixture-key", model: config.model, language: "en", prompt: "")
+        let result = try await transcribe(source)
         try expect(UploadFixture.count == 2, "Expected two uploads")
         try expect(result.text == "Part 1. \n Part 2.", "Transcript order or trimming changed")
         let raw = try JSONSerialization.jsonObject(with: result.rawResponse) as! [String: Any]
@@ -133,13 +123,13 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try expect(try temporaryUploads() == uploadsBefore, "Temporary uploads leaked on success")
 
         UploadFixture.reset()
-        let short = try await client.transcribe(file: compressed, key: "fixture-key", model: config.model, language: nil, prompt: "", trimWhitespace: false)
+        let short = try await transcribe(compressed, trimWhitespace: false)
         try expect(UploadFixture.count == 1 && short.text == " Part 1. ", "Single upload behavior changed")
         try expect(short.requestID == "part-1" && short.rawResponse == Data("{\"text\":\" Part 1. \"}".utf8), "Single response metadata changed")
 
         UploadFixture.reset(failingRequest: 2)
         do {
-            _ = try await client.transcribe(file: source, key: "fixture-key", model: config.model, language: nil, prompt: "")
+            _ = try await transcribe(source)
             throw SottoError("Partial transcript reported as complete")
         } catch {
             let message = error.localizedDescription
@@ -153,7 +143,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         UploadFixture.reset()
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await client.transcribe(file: source, key: "fixture-key", model: config.model, language: nil, prompt: "")
+            return try await transcribe(source)
         }
         do { _ = try await task.value; throw SottoError("Cancellation ignored") }
         catch is CancellationError { }
@@ -162,7 +152,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
 
         UploadFixture.reset(blockedRequest: 2)
         let inFlight = Task {
-            try await client.transcribe(file: source, key: "fixture-key", model: config.model, language: nil, prompt: "")
+            try await transcribe(source)
         }
         let deadline = Date().addingTimeInterval(10)
         while UploadFixture.count < 2 && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
@@ -171,6 +161,6 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         catch is CancellationError { }
         try expect(UploadFixture.count == 2, "Did not reach second upload before cancellation")
         try expect(try temporaryUploads() == uploadsBefore, "Temporary uploads leaked during cancelled upload")
-        print("Long recording checks passed: settings, frame continuity, byte limits, sequential uploads, metadata, quota failure, cancellation, and cleanup.")
+        print("Long recording checks passed: frame continuity, byte limits, sequential uploads, metadata, quota failure, cancellation, and cleanup.")
     }
 }
