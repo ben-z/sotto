@@ -34,6 +34,10 @@ jobs:
         run: |
           swiftc -swift-version 6 -parse-as-library Sources/SottoCore/*.swift scripts/test-long-recordings.swift -o .build/test-long-recordings
           .build/test-long-recordings
+      - name: Recording deadline tests
+        run: |
+          swiftc -swift-version 6 -parse-as-library Sources/SottoCore/Configuration.swift Sources/SottoCore/Archive.swift Sources/SottoCore/Session.swift scripts/test-session.swift -o .build/test-session
+          .build/test-session
       - name: Benchmark accounting and prerequisite tests
         run: python3 scripts/test-benchmark.py
       - name: Diagnostic log tests

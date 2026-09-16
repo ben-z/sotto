@@ -51,6 +51,8 @@ public final class Session: ObservableObject {
             deadline = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(maximumSeconds)) }
                 catch { return }
+                // finish cancels a pending deadline; this deadline has already fired.
+                self?.deadline = nil
                 await self?.finish()
             }
         } catch {
