@@ -8,22 +8,26 @@ final class AudioChunks {
     private let input: AVAudioFile
     private let framesPerChunk: AVAudioFramePosition
     private let buffer: AVAudioPCMBuffer
+    private let outputFormat: AVAudioFormat
 
     init(file: URL, maximumBytes: Int = maximumUploadBytes, maximumSeconds: Double = 600) throws {
         input = try AVAudioFile(forReading: file)
         let format = input.processingFormat
         let bytesPerFrame = Int(format.channelCount) * 2 // PCM16 WAV
-        guard maximumBytes > 8192, bytesPerFrame > 0, maximumSeconds.isFinite, maximumSeconds > 0 else {
+        let headerBytes = 8192 // AVAudioFile pads WAV headers beyond the PCM payload.
+        guard maximumBytes > headerBytes, bytesPerFrame > 0, maximumSeconds.isFinite, maximumSeconds > 0 else {
             throw SottoError("Invalid audio chunk limits.")
         }
-        // AVAudioFile pads WAV headers; reserve space beyond the PCM payload.
-        framesPerChunk = min(AVAudioFramePosition((maximumBytes - 8192) / bytesPerFrame),
-                             AVAudioFramePosition(maximumSeconds * format.sampleRate))
+        let byteLimitedFrames = (maximumBytes - headerBytes) / bytesPerFrame
+        framesPerChunk = AVAudioFramePosition(min(Double(byteLimitedFrames), maximumSeconds * format.sampleRate))
         guard input.length > 0, framesPerChunk > 0 else { throw SottoError("Audio contains no readable frames.") }
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_384) else {
-            throw SottoError("Could not allocate an audio chunk buffer.")
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_384),
+              let outputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: format.sampleRate,
+                                               channels: format.channelCount, interleaved: true) else {
+            throw SottoError("Could not prepare the audio chunk format and buffer.")
         }
         self.buffer = buffer
+        self.outputFormat = outputFormat
     }
 
     /// Contiguous frame ranges preserve all audio, including the final partial chunk.
@@ -33,15 +37,8 @@ final class AudioChunks {
         guard start < input.length else { return nil }
         let count = min(framesPerChunk, input.length - start)
         let format = input.processingFormat
-        let output = try AVAudioFile(forWriting: destination, settings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: format.channelCount,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false
-        ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+        let output = try AVAudioFile(forWriting: destination, settings: outputFormat.settings,
+                                     commonFormat: format.commonFormat, interleaved: format.isInterleaved)
         let end = start + count
         while input.framePosition < end {
             try Task.checkCancellation()

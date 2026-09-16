@@ -103,6 +103,12 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         }
         try expect(decodedFrames == (try AVAudioFile(forReading: compressed).length), "AAC tail lost")
 
+        // Apply the byte cap before converting a large duration to an integer frame count.
+        let largeLimit = try AudioChunks(file: compressed, maximumSeconds: .greatestFiniteMagnitude)
+        try expect(try largeLimit.next(to: part) != nil, "Large duration limit rejected valid audio")
+        try expect(try AVAudioFile(forReading: part).length == decodedFrames, "Large duration limit lost audio")
+        try FileManager.default.removeItem(at: part)
+
         let settings = URLSessionConfiguration.ephemeral
         settings.protocolClasses = [UploadFixture.self]
         let client = GroqClient(transcriptionEndpoint: URL(string: "https://sotto.invalid/transcriptions")!, uploadConfiguration: settings)
