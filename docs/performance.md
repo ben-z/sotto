@@ -10,6 +10,17 @@ The [September 8 live app report](performance-results.md) is a separate real-mic
 
 Live runs produce `report.md`, `report.json`, and `samples.json` in timestamped directories under `work/performance/`. Reports include machine/OS, executable hash, source revision/dirty state, model, and actual audio duration/size. Do not publish partial or failed runs as baselines.
 
+## Protocol v3 baseline
+
+[Successful CI run](https://github.com/ben-z/sotto/actions/runs/35052182787), September 16, 2026. The measured source was clean PR merge commit `3076de4a0ecd35340289cb5fcd5b6af2a57c834d`, combining base `4dd044b` with PR head `a8400a3`. These unmodified snapshots include audio and response hashes, memory budgets, environment, deadline, and workflow URL.
+
+| Runner | Idle median before / after (MiB) | Short / long / three-hour upload peak (MiB) | Warm-up peak (MiB) | Packaged app bytes |
+| --- | ---: | ---: | ---: | ---: |
+| [arm64 report](benchmarks/3076de4/arm64.json) | 7.9 / 5.4 | 8.8 / 7.8 / 10.5 | 10.1 | 1,641,182 |
+| [x86_64 report](benchmarks/3076de4/x86_64.json) | 10.4 / 10.7 | 11.3 / 11.6 / 12.8 | 11.3 | 1,646,366 |
+
+Both architectures completed all 84 uploads, verified 64,800 unique words per three-hour transcript, and passed every budget. Idle median fell by 2.53 MiB on arm64 and grew by 0.30 MiB on Intel. These are sampled physical-footprint measurements of the optimized production core, not the full app. Compare future v3 results with the same architecture; v2 below used sparse responses and is historical context.
+
 ## Protocol v2 baseline
 
 [Successful CI run](https://github.com/ben-z/sotto/actions/runs/35049546891), September 16, 2026. The measured source was GitHub's clean PR merge commit `adda78dc9ec33d0473e9d2709b9d10de816032cf`, combining base `4dd044b` with PR head `3c54933`. These unmodified JSON snapshots preserve the exact measured revision, fixture hashes, limits, environment, and workflow URL after artifacts expire.
@@ -67,7 +78,7 @@ The host has a 15-minute workload deadline within a 20-minute CI job. The v2 arm
 
 - **September 16, 2026 — multipart temporary buffers:** bounded `FileHandle` reads still accumulated autoreleased Foundation buffers on concurrency threads. In the local v1 workload, releasing buffers per block reduced sampled peak footprint from 52.6 to 12.7 MiB and retained growth from 24.3 to 4.7 MiB. The per-block pool is covered by the resource gate; do not remove it without an equivalent measured result.
 - **Protocol v2 — long recordings:** added the three-hour fixture so loading entire recordings, retaining decoded audio across parts, and incomplete chunk cleanup are visible to CI. Budgets were tightened from 96/128/24 MiB to 64/96/16 MiB for idle/active/growth. The [arm64](benchmarks/adda78d/arm64.json) and [x86_64](benchmarks/adda78d/x86_64.json) baseline snapshots under `docs/benchmarks/` include their workflow URL. Do not relabel v1 results as v2.
-- **Protocol v3 — speech-heavy responses:** the v2 server returned only three words per part, hiding growth from retaining all word dictionaries. Raw part responses now spool directly to disk, and the completed envelope uses a file-backed mapping. Only the neighboring decoded transcripts are kept for overlap reconciliation. V3 returns six words per second and verifies all 64,800 words in each three-hour transcript; the existing memory budgets are unchanged. In a local arm64 comparison using the same v3 fixture, the prior response handling peaked at 36.8 MiB and the streaming implementation at 22.7 MiB. Both passed the absolute budgets; these ceilings catch large regressions, while versioned reports expose changes below the ceilings. V2 snapshots above remain historical evidence; v3 needs its own successful baseline on each architecture.
+- **Protocol v3 — speech-heavy responses:** the v2 server returned only three words per part, hiding growth from retaining all word dictionaries. Raw part responses now spool directly to disk, and the completed envelope uses a file-backed mapping. Only the neighboring decoded transcripts are kept for overlap reconciliation. V3 returns six words per second and verifies all 64,800 words in each three-hour transcript; the existing memory budgets are unchanged. In a local arm64 comparison using the same v3 fixture, the prior response handling peaked at 36.8 MiB and the streaming implementation at 22.7 MiB. Both passed the absolute budgets; these ceilings catch large regressions, while versioned reports expose changes below the ceilings. The [arm64](benchmarks/3076de4/arm64.json) and [x86_64](benchmarks/3076de4/x86_64.json) v3 baselines above preserve the successful speech-heavy measurements; v2 remains historical evidence.
 - Keep budgets and protocol changes in reviewable commits. A regression requires investigation; raising limits is not the default fix. `AGENTS.md` carries this requirement into future coding tasks.
 
 Build the CI app and run locally with:

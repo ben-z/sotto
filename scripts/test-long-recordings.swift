@@ -72,7 +72,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         let source = root.appendingPathComponent("source.wav")
         try writeAudio(to: source, seconds: 783) // Exceeds the 25 MB attachment limit.
         let compressed = try verifyChunking(source: source, directory: root)
-        try verifyBoundaryText()
+        try verifyMergeContract()
         try await verifyDirectImports(directory: root)
         try await verifyUploads(source: source, compressed: compressed)
         print("Long recording checks passed: frame continuity, byte limits, sequential uploads, metadata, quota failure, cancellation, and cleanup.")
@@ -138,23 +138,39 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         return compressed
     }
 
-    static func verifyBoundaryText() throws {
-        let first = ChunkTranscript(text: "Hello, splitword", words: [
-            .init(word: "Hello,", start: 597, end: 598), .init(word: "splitword", start: 598.7, end: 599.5)
-        ])
-        let second = ChunkTranscript(text: "splitword again again.", words: [
-            .init(word: "splitword", start: 0.7, end: 1.5), .init(word: "again", start: 2, end: 2.5),
-            .init(word: "again.", start: 3, end: 3.5)
-        ])
-        let text = try first.retaining(0..<599) + second.retaining(1..<10)
-        try expect(text == "Hello, splitword again again.", "Boundary reconciliation lost speech or legitimate repetition")
-        let chinese = ChunkTranscript(text: "你好世界", words: [
-            .init(word: "你好", start: 0, end: 1), .init(word: "世界", start: 1, end: 2)
-        ])
-        try expect(try chinese.retaining(1..<2) == "世界", "Reconciliation inserted whitespace")
-        try expect(try second.retaining(5..<10).isEmpty, "Context-only words were retained")
+    static func verifyMergeContract() throws {
+        let left = AudioChunks.Segment(startSeconds: 0, durationSeconds: 600, retainedSeconds: 0..<599)
+        let right = AudioChunks.Segment(startSeconds: 598, durationSeconds: 185, retainedSeconds: 1..<185)
+        let times = [598.2, 598.6, 599.0, 599.4, 599.8]
+        // Every combination of recognized/missing words on both sides, with
+        // independent timestamp drift. Shared words survive once; unmatched words
+        // survive exactly when their response owns them, in source order.
+        for leftMask in 0..<32 {
+            for rightMask in 0..<32 {
+                for drift in [-0.1, 0.0, 0.1] {
+                    func transcript(mask: Int, offset: Double, drift: Double) -> ChunkTranscript {
+                        let words = times.indices.filter { mask & (1 << $0) != 0 }.map { index in
+                            let midpoint = times[index] - offset + drift
+                            return ChunkTranscript.Word(word: "word\(index)", start: midpoint - 0.03, end: midpoint + 0.03)
+                        }
+                        return ChunkTranscript(text: words.map { $0.word + " " }.joined(), words: words)
+                    }
+                    var merger = ChunkTranscriptMerger()
+                    try merger.append(transcript(mask: leftMask, offset: 0, drift: drift), segment: left)
+                    try merger.append(transcript(mask: rightMask, offset: 598, drift: -drift), segment: right)
+                    let expected = times.indices.filter { index in
+                        let inLeft = leftMask & (1 << index) != 0, inRight = rightMask & (1 << index) != 0
+                        return (inLeft && inRight) || (inLeft && times[index] + drift < 599)
+                            || (inRight && times[index] - drift >= 599)
+                    }.map { "word\($0)" }
+                    let actual = try merger.finish().split(whereSeparator: \.isWhitespace).map(String.init)
+                    try expect(actual == expected, "Overlap contract failed for masks \(leftMask)/\(rightMask), drift \(drift)")
+                }
+            }
+        }
+        var missingMetadata = ChunkTranscriptMerger()
         do {
-            _ = try ChunkTranscript(text: "Missing metadata", words: nil).retaining(0..<10)
+            try missingMetadata.append(ChunkTranscript(text: "Missing metadata", words: nil), segment: left)
             throw SottoError("Accepted missing timestamps")
         } catch {
             try expect(error.localizedDescription.contains("Groq omitted word timestamps"), "Missing timestamps did not fail clearly")
@@ -290,6 +306,27 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         })
         let repeatedResult = try await transcribe(source)
         try expect(repeatedResult.text == "Hello go go world", "Alignment removed a legitimate repeated word")
+
+        // Matching an overlap anchor must not erase a different owned word
+        // before or after it in either response.
+        for (firstText, firstWords, secondText, secondWords, expected) in [
+            ("alpha beta", [("alpha", 598.4), ("beta", 598.8)],
+             "alpha gamma", [("alpha", 0.4), ("gamma", 1.4)], "alpha beta gamma"),
+            ("alpha gamma", [("alpha", 599.2), ("gamma", 599.7)],
+             "beta alpha gamma", [("beta", 1.05), ("alpha", 1.2), ("gamma", 1.7)], "beta alpha gamma"),
+            ("alpha beta shared", [("alpha", 598.2), ("beta", 598.7), ("shared", 599.4)],
+             "alpha gamma shared", [("alpha", 0.2), ("gamma", 1.1), ("shared", 1.4)], "alpha beta gamma shared")
+        ] {
+            let payloads = try [(firstText, firstWords), (secondText, secondWords)].map { text, words in
+                let payload: [String: Any] = ["text": text, "words": words.map { word, midpoint in
+                    ["word": word, "start": midpoint - 0.04, "end": midpoint + 0.04] as [String: Any]
+                }]
+                return String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
+            }
+            UploadFixture.reset(payloads: payloads)
+            let joined = try await transcribe(source)
+            try expect(joined.text == expected, "Alignment dropped an unmatched owned word: \(joined.text)")
+        }
 
         UploadFixture.reset()
         let short = try await transcribe(compressed, trimWhitespace: false)

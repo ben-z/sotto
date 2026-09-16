@@ -11,21 +11,15 @@ struct ChunkTranscript: Decodable {
     let text: String
     let words: [Word]?
 
-    func retaining(_ seconds: Range<Double>, following previous: Character? = nil) throws -> String {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return text }
-        guard let words, !words.isEmpty else {
+    func validate() throws {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(words ?? []).isEmpty else {
             throw SottoError("Groq omitted word timestamps needed to reconcile overlapping audio.")
         }
-        let kept = words.indices.filter { seconds.contains((words[$0].start + words[$0].end) / 2) }
-        guard let first = kept.first, let last = kept.last else { return "" }
-        return try slice(first..<(last + 1), following: previous)
     }
 
     func slice(_ indices: Range<Int>, following previous: Character? = nil) throws -> String {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return text }
-        guard let words, !words.isEmpty else {
-            throw SottoError("Groq omitted word timestamps needed to reconcile overlapping audio.")
-        }
+        try validate()
+        guard let words, !words.isEmpty else { return text }
         guard !indices.isEmpty else { return "" }
         let first = indices.lowerBound, last = indices.upperBound - 1
         if first == 0 && last == words.count - 1 { return text }
@@ -57,8 +51,8 @@ struct ChunkTranscript: Decodable {
     }
 }
 
-/// Keeps one pending response so adjacent overlap words can share a single seam.
-/// Timestamps locate the overlap; matching words decide which response owns it.
+/// Keeps one pending response to reconcile neighboring overlap words.
+/// Shared words appear once; unmatched words keep their nominal ownership.
 struct ChunkTranscriptMerger {
     private struct Pending {
         let transcript: ChunkTranscript
@@ -70,18 +64,55 @@ struct ChunkTranscriptMerger {
 
     mutating func append(_ transcript: ChunkTranscript, segment: AudioChunks.Segment) throws {
         // Validate metadata even if this chunk will be held until the next upload.
-        _ = try transcript.retaining(segment.retainedSeconds)
+        try transcript.validate()
         var first = 0
         if let previous = pending {
             let left = previous.transcript.words ?? []
             let right = transcript.words ?? []
-            var end = left.firstIndex { ($0.start + $0.end) / 2 >= previous.segment.retainedSeconds.upperBound } ?? left.count
-            first = right.firstIndex { ($0.start + $0.end) / 2 >= segment.retainedSeconds.lowerBound } ?? right.count
-            if let seam = Self.seam(left: left, right: right, previous: previous.segment, current: segment) {
-                end = seam.left + 1
-                first = seam.right + 1
+            let offset = segment.startSeconds - previous.segment.startSeconds
+            let overlap = previous.segment.durationSeconds - offset
+            let leftStart = max(previous.first, left.firstIndex { $0.end >= offset } ?? left.count)
+            first = right.firstIndex { $0.start > overlap } ?? right.count
+            let pairs = Self.align(left: left, right: right, lhs: leftStart..<left.count, rhs: 0..<first,
+                                   offset: offset, overlap: overlap)
+            var pieces: [(left: Bool, range: Range<Int>)] = []
+            if previous.first < leftStart { pieces.append((true, previous.first..<leftStart)) }
+            func choose(left: Bool, index: Int) {
+                if let last = pieces.last, last.left == left, last.range.upperBound == index {
+                    pieces[pieces.count - 1].range = last.range.lowerBound..<(index + 1)
+                } else {
+                    pieces.append((left, index..<(index + 1)))
+                }
             }
-            text += try previous.transcript.slice(previous.first..<max(previous.first, end), following: text.last)
+            func leftOwns(_ index: Int) -> Bool {
+                (left[index].start + left[index].end) / 2 < previous.segment.retainedSeconds.upperBound
+            }
+            var i = leftStart, j = 0
+            // Alignment anchors remove duplicates without discarding the unmatched
+            // words between them. The sentinel also flushes both unmatched tails.
+            for (leftIndex, rightIndex) in pairs + [(left.count, first)] {
+                while i < leftIndex {
+                    if leftOwns(i) { choose(left: true, index: i) }
+                    i += 1
+                }
+                while j < rightIndex {
+                    if (right[j].start + right[j].end) / 2 >= segment.retainedSeconds.lowerBound {
+                        choose(left: false, index: j)
+                    }
+                    j += 1
+                }
+                if leftIndex < left.count && rightIndex < first {
+                    // One shared word survives even if timestamp drift puts both
+                    // copies outside their nominal ownership intervals.
+                    if leftOwns(leftIndex) { choose(left: true, index: leftIndex) }
+                    else { choose(left: false, index: rightIndex) }
+                    i += 1; j += 1
+                }
+            }
+            for piece in pieces {
+                let source = piece.left ? previous.transcript : transcript
+                text += try source.slice(piece.range, following: text.last)
+            }
         }
         pending = Pending(transcript: transcript, segment: segment, first: first)
     }
@@ -94,14 +125,9 @@ struct ChunkTranscriptMerger {
         return text
     }
 
-    private static func seam(left: [ChunkTranscript.Word], right: [ChunkTranscript.Word],
-                             previous: AudioChunks.Segment, current: AudioChunks.Segment) -> (left: Int, right: Int)? {
-        let offset = current.startSeconds - previous.startSeconds
-        let overlap = previous.durationSeconds - offset
-        guard overlap > 0 else { return nil }
-        let lhs = left.indices.filter { left[$0].end >= offset && left[$0].start <= previous.durationSeconds }
-        let rhs = right.indices.filter { right[$0].end >= 0 && right[$0].start <= overlap }
-        guard !lhs.isEmpty, !rhs.isEmpty else { return nil }
+    private static func align(left: [ChunkTranscript.Word], right: [ChunkTranscript.Word],
+                              lhs: Range<Int>, rhs: Range<Int>, offset: Double, overlap: Double) -> [(Int, Int)] {
+        guard overlap > 0, !lhs.isEmpty, !rhs.isEmpty else { return [] }
         func token(_ word: ChunkTranscript.Word) -> String {
             let normalized = word.word.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
             return normalized.isEmpty ? word.word : normalized
@@ -131,9 +157,6 @@ struct ChunkTranscriptMerger {
             }
             row = next
         }
-        let boundary = previous.retainedSeconds.upperBound
-        return row.last?.pairs.min {
-            abs((left[$0.0].start + left[$0.0].end) / 2 - boundary) < abs((left[$1.0].start + left[$1.0].end) / 2 - boundary)
-        }.map { (left: $0.0, right: $0.1) }
+        return row.last?.pairs ?? []
     }
 }
