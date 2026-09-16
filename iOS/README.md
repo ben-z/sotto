@@ -42,7 +42,7 @@ xcrun simctl list devices available
 scripts/test-ios.sh SIMULATOR_UDID
 ```
 
-Use a disposable, booted simulator with microphone input, internet access, and no Groq key. The script authorizes its microphone permission and seeds a small completed-note fixture. The editor test checks saved-note persistence independently of recording. The rejected-key check contacts Groq with an intentionally invalid test key and verifies it is not saved. The recording test records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
+Use a disposable, booted simulator with microphone input and no Groq key. The script authorizes its microphone permission and seeds a small completed-note fixture. The editor test checks saved-note persistence independently of recording. The rejected-key UI check uses a Debug-simulator-only fixture to verify the displayed error and confirm after relaunch that the key was not saved; it does not contact Groq. Core tests separately verify real HTTP response handling, including 401, 403, 429, and service errors. Release and physical-device builds exclude the fixture. The recording test records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
 
 ## Architecture
 

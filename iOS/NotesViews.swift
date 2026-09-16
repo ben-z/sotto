@@ -205,6 +205,16 @@ struct SettingsView: View {
     @State private var checking = false
     @State private var keyResult: Result<String, Error>?
 
+    private func verifyKey(_ candidate: String) async throws {
+        #if DEBUG && targetEnvironment(simulator)
+        // UI tests cover presentation/persistence; core tests cover HTTP parsing.
+        if ProcessInfo.processInfo.arguments.contains("--reject-key-check") {
+            throw SottoError("Key verification rejected by the UI-test fixture.")
+        }
+        #endif
+        try await GroqClient().verifyKey(candidate, model: model)
+    }
+
     private var recordingMinutes: Binding<Int> {
         Binding(get: { Int(maxRecordingSeconds / 60) }, set: { minutes in
             let seconds = Double(max(minutes, 1)) * 60
@@ -224,7 +234,7 @@ struct SettingsView: View {
                             checking = true; keyResult = nil
                             defer { checking = false }
                             do {
-                                try await GroqClient().verifyKey(candidate, model: model)
+                                try await verifyKey(candidate)
                                 try GroqKeychain.save(candidate); key = ""; store.refreshKey()
                                 keyResult = .success("Key verified and saved. Queued recordings will transcribe automatically.")
                             } catch { keyResult = .failure(error) }

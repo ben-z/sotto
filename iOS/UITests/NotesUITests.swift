@@ -188,6 +188,7 @@ final class NotesUITests: XCTestCase {
     func testRejectedKeyIsNotSaved() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments = ["--reject-key-check"]
         app.launch()
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
         app.buttons["Settings"].tap()
@@ -197,11 +198,12 @@ final class NotesUITests: XCTestCase {
         let save = app.buttons["Save and check key"]
         XCTAssertTrue(save.isEnabled)
         save.tap()
-        XCTAssertTrue(app.staticTexts["Key rejected by Groq (HTTP 401). Check the API key and try again."].waitForExistence(timeout: 25), "The live Groq key check must reject the test key")
+        XCTAssertTrue(app.staticTexts["Key verification rejected by the UI-test fixture."].waitForExistence(timeout: 5))
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Rejected Groq key"; attachment.lifetime = .keepAlways
         add(attachment)
-        app.buttons["Done"].tap()
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.secureTextFields["Groq API key"].waitForExistence(timeout: 5))
     }
