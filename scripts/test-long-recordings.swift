@@ -111,13 +111,24 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
             try input.read(into: buffer)
             try output.write(from: buffer)
         }
+        let reference = try AVAudioFile(forReading: compressed)
+        let decoded = AVAudioPCMBuffer(pcmFormat: reference.processingFormat, frameCapacity: AVAudioFrameCount(reference.length))!
+        try reference.read(into: decoded)
         let compressedChunks = try AudioChunks(file: compressed, maximumSeconds: 2)
         var decodedFrames: AVAudioFramePosition = 0
         while let _ = try compressedChunks.next(to: part) {
-            decodedFrames += try AVAudioFile(forReading: part).length
+            let audio = try AVAudioFile(forReading: part)
+            let buffer = AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: AVAudioFrameCount(audio.length))!
+            try audio.read(into: buffer)
+            try expect(decodedFrames + audio.length <= reference.length, "AAC duplicated trailing audio")
+            for index in 0..<Int(buffer.frameLength) {
+                let expected = decoded.floatChannelData![0][Int(decodedFrames) + index]
+                try expect(abs(buffer.floatChannelData![0][index] - expected) <= 1 / 32768, "AAC seek changed decoded audio beyond PCM16 quantization")
+            }
+            decodedFrames += audio.length
             try FileManager.default.removeItem(at: part)
         }
-        try expect(decodedFrames == (try AVAudioFile(forReading: compressed).length), "AAC tail lost")
+        try expect(decodedFrames == reference.length, "AAC tail lost")
 
         // Apply the byte cap before converting a large duration to an integer frame count.
         let largeLimit = try AudioChunks(file: compressed, maximumSeconds: .greatestFiniteMagnitude)
