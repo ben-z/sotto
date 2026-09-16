@@ -72,7 +72,7 @@ Memory and size budgets live in [`scripts/ci-memory/budgets.json`](../scripts/ci
 
 Every PR and main push runs the benchmark with pinned Xcode 16.4. Job summaries show phase measurements; `resource-usage-macos-15` and `resource-usage-macos-15-intel` retain the Markdown report, JSON report, and raw samples for 90 days. Reports include protocol version, commit and dirty state, runner image, architecture, OS/compiler, fixture hashes, budgets, and workflow URL. Compare like architectures and protocols; the original v1 baseline did not exercise decoding or chunking.
 
-The host has a 15-minute workload deadline within a 20-minute CI job. The v2 arm64 baseline spent 457.6 seconds in sampled phases; the previous eight-minute deadline left less than 5% headroom. The 15-minute deadline allows nearly twice that measured duration without relaxing any memory limit. Hosted pacing can make the 84-request workload substantially slower than a local run. Timeouts still fail CI and publish an explicitly incomplete failure report with partial samples; they never count as successful baselines.
+The host has a 15-minute workload deadline within a 30-minute CI job, leaving 15 minutes for checkout, builds, other tests, artifact uploads, and cleanup. The v2 arm64 baseline spent 457.6 seconds in sampled phases; the previous eight-minute deadline left less than 5% headroom. The 15-minute deadline allows nearly twice that measured duration without relaxing any memory limit. Hosted pacing can make the 84-request workload substantially slower than a local run. Timeouts still fail CI and publish an explicitly incomplete failure report with partial samples; they never count as successful baselines.
 
 ### Regression tracking
 
