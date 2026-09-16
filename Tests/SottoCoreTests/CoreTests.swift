@@ -131,11 +131,24 @@ import Testing
     #expect(try Data(contentsOf: url) == broken)
 }
 
-@Test(arguments: [0.0, 3601.0, Double.infinity, Double.nan])
+@Test(arguments: [0.0, -1.0, 86401.0, Double.infinity, Double.nan])
 func rejectsInvalidRecordingLimits(_ limit: Double) {
     var config = Configuration(recordingsDirectory: "/tmp/sotto")
     config.maxRecordingSeconds = limit
     #expect(throws: SottoError.self) { try config.validate() }
+}
+
+@Test func recordingLimitDefaultsAndSavedOverrides() throws {
+    var config = Configuration(recordingsDirectory: "/tmp/sotto")
+    #expect(config.maxRecordingSeconds == 10800)
+    for limit in [1.0, 1800, 3601, 10800, 86400] {
+        config.maxRecordingSeconds = limit
+        try config.validate()
+        #expect(try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(config)).maxRecordingSeconds == limit)
+    }
+    var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as? [String: Any])
+    json.removeValue(forKey: "maxRecordingSeconds")
+    #expect(try JSONDecoder().decode(Configuration.self, from: JSONSerialization.data(withJSONObject: json)).maxRecordingSeconds == 10800)
 }
 
 @Test(arguments: ["EN", "eng", "éé", "e1", ""])

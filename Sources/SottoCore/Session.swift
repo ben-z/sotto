@@ -47,8 +47,9 @@ public final class Session: ObservableObject {
             record = newRecord
             try recorder.start(at: archive.audioURL(newRecord), bitRate: configuration.audioBitRate)
             change(.recording, "Recording · \(newRecord.id)")
+            let maximumSeconds = configuration.maxRecordingSeconds
             deadline = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(self?.configuration.maxRecordingSeconds ?? 1800)) }
+                do { try await Task.sleep(for: .seconds(maximumSeconds)) }
                 catch { return }
                 await self?.finish()
             }

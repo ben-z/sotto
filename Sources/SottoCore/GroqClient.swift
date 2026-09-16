@@ -14,12 +14,17 @@ public struct TranscriptionResult: Sendable {
 
 public struct GroqClient: Sendable {
     private let transcriptionEndpoint: URL
+    private let uploadConfiguration: URLSessionConfiguration
     public init() {
         transcriptionEndpoint = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
+        uploadConfiguration = .ephemeral
     }
 
     // Internal test seam: production callers always use Groq's HTTPS endpoint.
-    init(transcriptionEndpoint: URL) { self.transcriptionEndpoint = transcriptionEndpoint }
+    init(transcriptionEndpoint: URL, uploadConfiguration: URLSessionConfiguration = .ephemeral) {
+        self.transcriptionEndpoint = transcriptionEndpoint
+        self.uploadConfiguration = uploadConfiguration
+    }
 
 
     /// Authenticated, read-only check. This does not prove inference quota or
@@ -53,9 +58,52 @@ public struct GroqClient: Sendable {
     }
 
     public func transcribe(file: URL, key: String, model: String, language: String?, prompt: String, trimWhitespace: Bool = true) async throws -> TranscriptionResult {
+        try Task.checkCancellation()
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size > 0, size < 25_000_000 else { throw SottoError("Audio must be nonempty and below 25 MB; original is retained at \(file.path).") }
+        guard size > 0 else { throw SottoError("Audio must be nonempty; original is retained at \(file.path).") }
         guard !key.isEmpty else { throw SottoError("Groq API key is empty.") }
+        if size >= AudioChunks.maximumUploadBytes {
+            return try await transcribeChunks(file: file, key: key, model: model, language: language, prompt: prompt, trimWhitespace: trimWhitespace)
+        }
+        return try await transcribeUpload(file: file, key: key, model: model, language: language, prompt: prompt).trimmingWhitespace(trimWhitespace)
+    }
+
+    private func transcribeChunks(file: URL, key: String, model: String, language: String?, prompt: String, trimWhitespace: Bool) async throws -> TranscriptionResult {
+        let start = ContinuousClock.now
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Sotto-chunks-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let chunk = directory.appendingPathComponent("chunk.wav")
+        let reader = try AudioChunks(file: file)
+        var texts: [String] = []
+        var responses: [[String: Any]] = []
+        while let range = try reader.next(to: chunk) {
+            do {
+                let result = try await transcribeUpload(file: chunk, key: key, model: model, language: language, prompt: prompt)
+                texts.append(result.text)
+                var response: [String: Any] = ["start_seconds": range.startSeconds, "duration_seconds": range.durationSeconds,
+                    "response": try JSONSerialization.jsonObject(with: result.rawResponse)]
+                if let requestID = result.requestID { response["request_id"] = requestID }
+                responses.append(response)
+            } catch {
+                try Task.checkCancellation()
+                throw SottoError("Transcription stopped at part \(responses.count + 1): \(error.localizedDescription) Original audio is retained at \(file.path). Retrying starts from the beginning.")
+            }
+            try FileManager.default.removeItem(at: chunk)
+        }
+        try Task.checkCancellation()
+        let text = texts.filter { !$0.isEmpty }.joined(separator: "\n")
+        // Preserve each unmodified API response and its offset in a Sotto envelope.
+        let raw = try JSONSerialization.data(withJSONObject: ["text": text, "chunks": responses], options: [.sortedKeys])
+        let elapsed = start.duration(to: .now).components
+        let milliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
+        return TranscriptionResult(text: text, rawResponse: raw, milliseconds: milliseconds, requestID: nil).trimmingWhitespace(trimWhitespace)
+    }
+
+    private func transcribeUpload(file: URL, key: String, model: String, language: String?, prompt: String) async throws -> TranscriptionResult {
+        try Task.checkCancellation()
+        let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size > 0, size < 25_000_000 else { throw SottoError("Audio upload must be nonempty and below Groq’s 25 MB attachment limit.") }
         let boundary = "Sotto-\(UUID().uuidString)"
         // Stream multipart to a temporary file; do not load an entire recording
         // into RAM. Upload file is deleted on success, failure, or cancellation.
@@ -69,7 +117,7 @@ public struct GroqClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let configuration = URLSessionConfiguration.ephemeral
+        let configuration = uploadConfiguration.copy() as! URLSessionConfiguration
         configuration.timeoutIntervalForRequest = 120
         configuration.timeoutIntervalForResource = 180
         let session = URLSession(configuration: configuration)
@@ -80,13 +128,16 @@ public struct GroqClient: Sendable {
         guard response.statusCode == 200 else {
             let detail = String(decoding: data.prefix(2000), as: UTF8.self)
                 .replacingOccurrences(of: key, with: "[redacted]")
+            if response.statusCode == 429 {
+                throw SottoError("Groq rate limit reached (HTTP 429). Audio-hour/day quotas apply even to split recordings. Wait for your quota to reset or check your plan at console.groq.com/settings/limits. \(detail)")
+            }
             throw SottoError("Groq HTTP \(response.statusCode): \(detail)")
         }
         struct Response: Decodable { let text: String }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         let elapsed = start.duration(to: .now).components
         let milliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
-        return TranscriptionResult(text: decoded.text, rawResponse: data, milliseconds: milliseconds, requestID: response.value(forHTTPHeaderField: "x-request-id")).trimmingWhitespace(trimWhitespace)
+        return TranscriptionResult(text: decoded.text, rawResponse: data, milliseconds: milliseconds, requestID: response.value(forHTTPHeaderField: "x-request-id"))
     }
 
     static func writeMultipart(audio: URL, destination: URL, boundary: String, fields: [(String, String)]) throws {
@@ -105,7 +156,10 @@ public struct GroqClient: Sendable {
         try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"recording.\(ext)\"\r\nContent-Type: \(mime)\r\n\r\n")
         let input = try FileHandle(forReadingFrom: audio)
         defer { try? input.close() }
-        while let chunk = try input.read(upToCount: 65536), !chunk.isEmpty { try output.write(contentsOf: chunk) }
+        while let chunk = try input.read(upToCount: 65536), !chunk.isEmpty {
+            try Task.checkCancellation()
+            try output.write(contentsOf: chunk)
+        }
         try write("\r\n--\(boundary)--\r\n")
     }
 }

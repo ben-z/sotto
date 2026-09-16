@@ -198,6 +198,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("notes.model") private var model = "whisper-large-v3-turbo"
     @AppStorage("notes.language") private var language = "en"
+    @AppStorage("notes.maxRecordingSeconds") private var maxRecordingSeconds = Configuration.defaultMaxRecordingSeconds
     @State private var key = ""
     @State private var folderPicker = false
     @State private var folderError: String?
@@ -242,6 +243,22 @@ struct SettingsView: View {
                         Text("whisper-large-v3").tag("whisper-large-v3")
                     }
                 } footer: { Text("Applies to new recordings. Audio is sent to Groq for transcription using your key.") }
+                Section("Recording limit") {
+                    Stepper(value: $maxRecordingSeconds, in: 60...Configuration.recordingSecondsRange.upperBound, step: 60) {
+                        HStack {
+                            Text("Maximum")
+                            TextField("Minutes", value: Binding(get: { Int(maxRecordingSeconds / 60) }, set: {
+                                maxRecordingSeconds = Double(min(max($0, 1), 1440)) * 60
+                            }), format: .number)
+                                .keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                                .accessibilityLabel("Maximum recording duration in minutes")
+                            Text("minutes")
+                        }
+                    }
+                    Button("Reset to 3 hours") { maxRecordingSeconds = Configuration.defaultMaxRecordingSeconds }
+                        .disabled(maxRecordingSeconds == Configuration.defaultMaxRecordingSeconds)
+                    Text("Applies to new recordings. Default: 180 minutes (3 hours). Groq account quotas still apply to transcription.").font(.caption).foregroundStyle(.secondary)
+                }
                 Section {
                     Toggle("Save recording location", isOn: $store.locationEnabled)
                     if let message = store.locationMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
