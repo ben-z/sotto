@@ -20,7 +20,26 @@ ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('memory', ROOT / 'scripts/benchmark-memory.py')
 memory = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(memory)
-PHASES = ('warmup', 'idle_before', 'short_upload', 'long_upload', 'idle_after')
+PHASES = ('warmup', 'idle_before', 'short_upload', 'long_upload', 'chunked_upload', 'idle_after')
+BUDGET_FILE = ROOT / 'scripts/ci-memory/budgets.json'
+FIXTURES = {'short': 60, 'long': 600, 'chunked': 10800}
+EXPECTED_UPLOADS = 4 * (1 + 1 + 19)  # Warm-up plus three cycles; three-hour audio has 19 overlapping parts.
+
+
+def load_budgets():
+    limits = json.loads(BUDGET_FILE.read_text())
+    if set(limits) != {'idle_peak_mib', 'active_peak_mib', 'idle_growth_mib', 'bundle_mib'}:
+        raise ValueError('Unexpected memory budget keys')
+    for value in limits.values():
+        memory.positive(str(value))
+    return limits
+
+
+def check_budgets(summary, bundle_bytes, limits):
+    failures = memory.check_limits(summary, limits['idle_peak_mib'], limits['active_peak_mib'], limits['idle_growth_mib'])
+    if bundle_bytes > limits['bundle_mib'] * memory.MIB:
+        failures.append(f"Packaged app exceeds {limits['bundle_mib']:g} MiB file-byte limit")
+    return failures
 
 
 class FixtureServer(http.server.BaseHTTPRequestHandler):
@@ -32,7 +51,9 @@ class FixtureServer(http.server.BaseHTTPRequestHandler):
             if self.path != '/transcriptions' or self.headers.get('Authorization') != 'Bearer benchmark-fixture-key':
                 raise ValueError('Unexpected endpoint or credential')
             remaining = total = int(self.headers['Content-Length'])
-            if not (1_920_044 < total < 1_922_044 or 19_200_044 < total < 19_202_044):
+            # Direct WAV headers and AVAudioFile's padded headers differ; allow
+            # container/multipart overhead but require an expected PCM duration.
+            if not any(seconds * 32000 < total < seconds * 32000 + 12_000 for seconds in (36, 60, 600)):
                 raise ValueError(f'Unexpected multipart size: {total}')
             prefix = bytearray()
             while remaining:
@@ -46,7 +67,7 @@ class FixtureServer(http.server.BaseHTTPRequestHandler):
             if b'whisper-large-v3-turbo' not in prefix or b'RIFF' not in prefix:
                 raise ValueError('Missing production multipart fields or WAV header')
             time.sleep(0.25)
-            body = b'{"text":" Sotto benchmark fixture. ","language":"en"}'
+            body = b'{"text":" Sotto benchmark fixture. ","language":"en","words":[{"word":"Sotto","start":10,"end":10.3},{"word":"benchmark","start":10.3,"end":10.7},{"word":"fixture.","start":10.7,"end":11}]}'
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
@@ -62,6 +83,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'work/ci-performance')
     args = parser.parse_args()
+    limits = load_budgets()
     if platform.system() != 'Darwin':
         raise RuntimeError('macOS runner required')
     args.output.mkdir(parents=True, exist_ok=True)
@@ -74,14 +96,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix='sotto-ci-benchmark-') as temporary:
         fixture = Path(temporary)
         fixtures = {}
-        for name, seconds in [('short', 60), ('long', 600)]:
+        for name, seconds in FIXTURES.items():
             path = fixture / (name + '.wav')
             with wave.open(str(path), 'wb') as audio:
                 audio.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
                 for _ in range(seconds):
                     audio.writeframesraw(bytes(32000))
-            fixtures[name] = dict(seconds=seconds, bytes=path.stat().st_size,
-                                  sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+            with path.open('rb') as stream:
+                digest = hashlib.sha256()
+                while block := stream.read(1_048_576):
+                    digest.update(block)
+            fixtures[name] = dict(seconds=seconds, bytes=path.stat().st_size, sha256=digest.hexdigest())
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FixtureServer)
         server.completed, server.errors = [], []
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -93,7 +118,7 @@ def main():
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ)
             phase, cycle = None, 0
-            deadline = time.monotonic() + 120
+            deadline = time.monotonic() + 240
             while process.poll() is None:
                 if time.monotonic() > deadline:
                     raise RuntimeError('Benchmark host timed out')
@@ -113,8 +138,8 @@ def main():
                             raise
             if process.returncode != 0:
                 raise RuntimeError('Benchmark host failed: ' + process.stderr.read())
-            if server.errors or len(server.completed) != 8:
-                raise RuntimeError(f'Fixture server failed: {server.errors}; completed {len(server.completed)}/8')
+            if server.errors or len(server.completed) != EXPECTED_UPLOADS:
+                raise RuntimeError(f'Fixture server failed: {server.errors}; completed {len(server.completed)}/{EXPECTED_UPLOADS}')
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -123,16 +148,14 @@ def main():
             server.server_close()
             (output / 'samples.json').write_text(json.dumps(samples) + '\n')
     summary = memory.summarize(samples, PHASES)
-    failures = memory.check_limits(summary, 96, 128, 24)
-    limits = dict(idle_peak_mib=96, active_peak_mib=128, idle_growth_mib=24, bundle_mib=2)
     bundle = ROOT / '.build/ci/Sotto.app'
     if not bundle.is_dir():
         raise RuntimeError('Packaged .build/ci/Sotto.app is required for the bundle-size check')
     bundle_bytes = sum(p.stat().st_size for p in bundle.rglob('*') if p.is_file())
-    if bundle_bytes > limits['bundle_mib'] * memory.MIB:
-        failures.append('Packaged app exceeds 2 MiB file-byte limit')
-    report = dict(workload='optimized production core with deterministic loopback HTTP fixture; not the menu-bar app',
+    failures = check_budgets(summary, bundle_bytes, limits)
+    report = dict(protocol_version=2, workload='optimized production core with deterministic loopback HTTP fixture; not the menu-bar app',
                   commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+                  dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
                   runner=os.environ.get('RUNNER_NAME', 'local'), architecture=platform.machine(), macos=platform.mac_ver()[0],
                   image=os.environ.get('ImageVersion', 'local'),
                   swift=subprocess.check_output(['swiftc', '--version'], text=True, stderr=subprocess.STDOUT).strip(),
@@ -146,9 +169,9 @@ def main():
     for phase, row in summary.items():
         lines.append(f"| {phase} | {row['footprint_median_mib']:.1f} / {row['footprint_peak_mib']:.1f} | {row['rss_peak_mib']:.1f} | {row['cpu_percent']:.2f} |")
     lines += ['', f'Packaged native app: {bundle_bytes:,} file bytes.',
-              'One short/long warm-up pair, then three cycles each of 60-second (1,920,044-byte) and 600-second (19,200,044-byte) deterministic silent PCM WAV fixtures, through real multipart construction, file upload, response parsing, and archive completion.',
+              'Protocol v2: one warm-up of all workloads, then three cycles each of 60-second, 600-second, and three-hour deterministic PCM WAV fixtures. The three-hour recording uses 19 overlapping uploads, exercising decoding, boundary reconciliation, multipart construction, and archive completion. All 84 uploads must complete.',
               'Five-second idle windows before/after; 20 ms sampling. Fixture server: 2 ms per 64 KiB read + 250 ms response delay. Server/sampler excluded. No microphone, Keychain, clipboard, UI, Groq service, or real transcription inference.',
-              'Limits: idle 96 MiB; active 128 MiB; retained idle growth 24 MiB; packaged app 2 MiB. Memory and size fail CI; CPU is reported, not gated on noisy shared runners.',
+              f"Checked-in budgets: idle {limits['idle_peak_mib']} MiB; active {limits['active_peak_mib']} MiB; retained idle growth {limits['idle_growth_mib']} MiB; packaged app {limits['bundle_mib']} MiB. Memory and size fail CI; CPU is reported, not gated on noisy shared runners.",
               '**' + ('FAIL: ' + '; '.join(failures) if failures else 'PASS') + '**', '']
     markdown = '\n'.join(lines)
     (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')

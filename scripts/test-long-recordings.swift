@@ -11,6 +11,11 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         lock.withLock { requests = 0; self.failingRequest = failingRequest; self.blockedRequest = blockedRequest }
     }
     static var count: Int { lock.withLock { requests } }
+    static func payload(_ index: Int) -> String {
+        """
+        {"text":" Part \(index). ","words":[{"word":"Part","start":10,"end":10.5},{"word":"\(index).","start":10.5,"end":11}]}
+        """
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -22,7 +27,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         let response = HTTPURLResponse(url: request.url!, statusCode: failing ? 429 : 200,
             httpVersion: "HTTP/1.1", headerFields: ["x-request-id": "part-\(index)"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data((failing ? "quota fixture-key" : "{\"text\":\" Part \(index). \"}").utf8))
+        client?.urlProtocol(self, didLoad: Data((failing ? "quota fixture-key" : Self.payload(index)).utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() { }
@@ -60,15 +65,17 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
         let source = root.appendingPathComponent("source.wav")
-        try writeAudio(to: source, seconds: 751) // Exceeds the 24 MB chunking threshold.
+        try writeAudio(to: source, seconds: 783) // Exceeds the 25 MB attachment limit.
         let compressed = try verifyChunking(source: source, directory: root)
+        try verifyBoundaryText()
+        try await verifyDirectImports(directory: root)
         try await verifyUploads(source: source, compressed: compressed)
         print("Long recording checks passed: frame continuity, byte limits, sequential uploads, metadata, quota failure, cancellation, and cleanup.")
     }
 
     static func verifyChunking(source: URL, directory: URL) throws -> URL {
         // Verify decoded content across every boundary, byte bounds, and final tail.
-        let chunks = try AudioChunks(file: source, maximumBytes: 100_096, maximumSeconds: 10)
+        let chunks = try AudioChunks(file: source, maximumBytes: 100_096, maximumSeconds: 10, overlapSeconds: 0)
         let part = directory.appendingPathComponent("part.wav")
         var frames: AVAudioFramePosition = 0
         while let range = try chunks.next(to: part) {
@@ -84,7 +91,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
             try expect((try part.resourceValues(forKeys: [.fileSizeKey]).fileSize!) < 100_096, "Chunk exceeds byte budget")
             try FileManager.default.removeItem(at: part)
         }
-        try expect(frames == 751 * 16000, "Lost trailing audio")
+        try expect(frames == 783 * 16000, "Lost trailing audio")
 
         // Exercise the AAC decoder used by actual Sotto recordings as well as WAV.
         let compressed = directory.appendingPathComponent("short.m4a")
@@ -98,7 +105,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
             try input.read(into: buffer)
             try output.write(from: buffer)
         }
-        let compressedChunks = try AudioChunks(file: compressed, maximumSeconds: 2)
+        let compressedChunks = try AudioChunks(file: compressed, maximumSeconds: 2, overlapSeconds: 0)
         var decodedFrames: AVAudioFramePosition = 0
         while let _ = try compressedChunks.next(to: part) {
             decodedFrames += try AVAudioFile(forReading: part).length
@@ -111,7 +118,57 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try expect(try largeLimit.next(to: part) != nil, "Large duration limit rejected valid audio")
         try expect(try AVAudioFile(forReading: part).length == decodedFrames, "Large duration limit lost audio")
         try FileManager.default.removeItem(at: part)
+        let overlapping = try AudioChunks(file: compressed, maximumSeconds: 2)
+        var retainedEnd = 0.0
+        var count = 0
+        while let range = try overlapping.next(to: part) {
+            let start = range.startSeconds + range.retainedSeconds.lowerBound
+            try expect(abs(start - retainedEnd) < 0.00001, "Overlapping chunks have a retained gap or duplicate")
+            if count > 0 { try expect(range.retainedSeconds.lowerBound > 0, "Missing leading audio context") }
+            retainedEnd = range.startSeconds + range.retainedSeconds.upperBound
+            count += 1
+            try FileManager.default.removeItem(at: part)
+        }
+        try expect(count > 1 && abs(retainedEnd - Double(decodedFrames) / 16000) < 0.00001, "Overlap lost the AAC tail")
         return compressed
+    }
+
+    static func verifyBoundaryText() throws {
+        let first = ChunkTranscript(text: "Hello, splitword", words: [
+            .init(word: "Hello,", start: 597, end: 598), .init(word: "splitword", start: 598.7, end: 599.5)
+        ])
+        let second = ChunkTranscript(text: "splitword again again.", words: [
+            .init(word: "splitword", start: 0.7, end: 1.5), .init(word: "again", start: 2, end: 2.5),
+            .init(word: "again.", start: 3, end: 3.5)
+        ])
+        let text = try first.retaining(0..<599) + second.retaining(1..<10)
+        try expect(text == "Hello, splitword again again.", "Boundary reconciliation lost speech or legitimate repetition")
+        let chinese = ChunkTranscript(text: "你好世界", words: [
+            .init(word: "你好", start: 0, end: 1), .init(word: "世界", start: 1, end: 2)
+        ])
+        try expect(try chinese.retaining(1..<2) == "世界", "Reconciliation inserted whitespace")
+        try expect(try second.retaining(5..<10).isEmpty, "Context-only words were retained")
+        do {
+            _ = try ChunkTranscript(text: "Missing metadata", words: nil).retaining(0..<10)
+            throw SottoError("Accepted missing timestamps")
+        } catch {
+            try expect(error.localizedDescription.contains("Groq omitted word timestamps"), "Missing timestamps did not fail clearly")
+        }
+    }
+
+    static func verifyDirectImports(directory: URL) async throws {
+        let settings = URLSessionConfiguration.ephemeral
+        settings.protocolClasses = [UploadFixture.self]
+        let client = GroqClient(transcriptionEndpoint: URL(string: "https://sotto.invalid/transcriptions")!, uploadConfiguration: settings)
+        for (ext, bytes) in [("ogg", 24_000_001), ("webm", 24_999_999)] {
+            let file = directory.appendingPathComponent("opaque.\(ext)")
+            FileManager.default.createFile(atPath: file.path, contents: nil)
+            let handle = try FileHandle(forWritingTo: file)
+            try handle.truncate(atOffset: UInt64(bytes)); try handle.close()
+            UploadFixture.reset()
+            _ = try await client.transcribe(file: file, key: "fixture-key", model: "whisper-large-v3-turbo", language: nil, prompt: "")
+            try expect(UploadFixture.count == 1, "Sub-25 MB import required local decoding")
+        }
     }
 
     static func verifyUploads(source: URL, compressed: URL) async throws {
@@ -130,8 +187,8 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try expect(result.text == "Part 1. \n Part 2.", "Transcript order or trimming changed")
         let raw = try JSONSerialization.jsonObject(with: result.rawResponse) as! [String: Any]
         let responses = raw["chunks"] as! [[String: Any]]
-        try expect(responses.count == 2 && responses[1]["start_seconds"] as? Double == 600, "Missing chunk offsets")
-        try expect(responses[1]["duration_seconds"] as? Double == 151, "Missing final chunk")
+        try expect(responses.count == 2 && responses[1]["start_seconds"] as? Double == 598, "Missing chunk offsets")
+        try expect(responses[1]["duration_seconds"] as? Double == 185, "Missing final chunk")
         try expect(responses[0]["request_id"] as? String == "part-1", "Missing request IDs")
         try expect((responses[0]["response"] as? [String: Any])?["text"] as? String == " Part 1. ", "Raw response changed")
         try expect(try temporaryUploads() == uploadsBefore, "Temporary uploads leaked on success")
@@ -139,7 +196,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         UploadFixture.reset()
         let short = try await transcribe(compressed, trimWhitespace: false)
         try expect(UploadFixture.count == 1 && short.text == " Part 1. ", "Single upload behavior changed")
-        try expect(short.requestID == "part-1" && short.rawResponse == Data("{\"text\":\" Part 1. \"}".utf8), "Single response metadata changed")
+        try expect(short.requestID == "part-1" && short.rawResponse == Data(UploadFixture.payload(1).utf8), "Single response metadata changed")
 
         UploadFixture.reset(failingRequest: 2)
         do {

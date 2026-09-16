@@ -1,0 +1,6 @@
+{
+  "idle_peak_mib": 64,
+  "active_peak_mib": 96,
+  "idle_growth_mib": 16,
+  "bundle_mib": 2
+}

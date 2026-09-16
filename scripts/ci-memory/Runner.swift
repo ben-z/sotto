@@ -14,7 +14,10 @@ struct MemoryWorkload {
         try FileManager.default.copyItem(at: directory.appendingPathComponent(name + ".wav"), to: archive.audioURL(record))
         let result = try await client.transcribe(file: archive.audioURL(record), key: "benchmark-fixture-key",
             model: record.model, language: record.language, prompt: "")
-        guard result.text == "Sotto benchmark fixture." else { throw SottoError("Unexpected fixture response") }
+        let parts = name == "chunked" ? 19 : 1
+        let expected = Array(repeating: " Sotto benchmark fixture. ", count: parts).joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.text == expected else { throw SottoError("Unexpected fixture response or missing upload parts") }
         try archive.complete(&record, with: result)
         guard record.status == "complete" else { throw SottoError("Archive did not complete") }
     }
@@ -28,13 +31,13 @@ struct MemoryWorkload {
         let archive = try Archive(directory: directory.appendingPathComponent("archive"))
         let client = GroqClient(transcriptionEndpoint: endpoint)
         phase("warmup")
-        for name in ["short", "long"] {
+        for name in ["short", "long", "chunked"] {
             try await transcribe(name, directory: directory, archive: archive, client: client)
         }
         phase("idle_before")
         try await Task.sleep(for: .seconds(5))
         for cycle in 1...3 {
-            for name in ["short", "long"] {
+            for name in ["short", "long", "chunked"] {
                 phase("\(name)_upload", cycle: cycle)
                 try await transcribe(name, directory: directory, archive: archive, client: client)
             }

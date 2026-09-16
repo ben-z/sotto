@@ -13,6 +13,7 @@ public struct TranscriptionResult: Sendable {
 }
 
 public struct GroqClient: Sendable {
+    static let maximumAttachmentBytes = 25_000_000
     private typealias Response = (text: String, rawResponse: Data, requestID: String?)
     private let transcriptionEndpoint: URL
     private let uploadConfiguration: URLSessionConfiguration
@@ -66,6 +67,8 @@ public struct GroqClient: Sendable {
         var fields = [("model", model), ("response_format", "verbose_json"), ("temperature", "0")]
         if let language { fields.append(("language", language)) }
         if !prompt.isEmpty { fields.append(("prompt", prompt)) }
+        let needsChunks = size >= Self.maximumAttachmentBytes
+        if needsChunks { fields.append(("timestamp_granularities[]", "word")) }
 
         // All parts share one session. Final timing and whitespace handling apply
         // to the complete transcription, regardless of how many uploads it takes.
@@ -75,7 +78,7 @@ public struct GroqClient: Sendable {
         let upload = { (audio: URL) in
             try await transcribeUpload(file: audio, key: key, fields: fields, session: session)
         }
-        let response = if size >= AudioChunks.maximumUploadBytes {
+        let response = if needsChunks {
             try await transcribeChunks(file: file, upload: upload)
         } else {
             try await upload(file)
@@ -98,7 +101,8 @@ public struct GroqClient: Sendable {
         while let range = try reader.next(to: chunk) {
             do {
                 let result = try await upload(chunk)
-                texts.append(result.text)
+                let transcript = try JSONDecoder().decode(ChunkTranscript.self, from: result.rawResponse)
+                texts.append(try transcript.retaining(range.retainedSeconds))
                 var response: [String: Any] = ["start_seconds": range.startSeconds, "duration_seconds": range.durationSeconds,
                     "response": try JSONSerialization.jsonObject(with: result.rawResponse)]
                 if let requestID = result.requestID { response["request_id"] = requestID }
@@ -118,7 +122,7 @@ public struct GroqClient: Sendable {
     private func transcribeUpload(file: URL, key: String, fields: [(String, String)], session: URLSession) async throws -> Response {
         try Task.checkCancellation()
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size > 0, size < 25_000_000 else { throw SottoError("Audio upload must be nonempty and below Groq’s 25 MB attachment limit.") }
+        guard size > 0, size < Self.maximumAttachmentBytes else { throw SottoError("Audio upload must be nonempty and below Groq’s 25 MB attachment limit.") }
         let boundary = "Sotto-\(UUID().uuidString)"
         // Stream multipart to a temporary file; do not load an entire recording
         // into RAM. Upload file is deleted on success, failure, or cancellation.
