@@ -49,6 +49,9 @@ final class NotesUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 70), .completed,
                        "Changing Settings must not extend the active recording's one-minute deadline")
+        saved.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "0:59|1:0[0-2]")).firstMatch.waitForExistence(timeout: 5),
+                      "The one-minute recording must not gain several seconds of timer tolerance")
         app.terminate(); app.launch()
         XCTAssertEqual(openLimit().value as? String, "180")
         app.buttons["Done"].tap()

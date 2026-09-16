@@ -49,7 +49,7 @@ public final class Session: ObservableObject {
             change(.recording, "Recording · \(newRecord.id)")
             let maximumSeconds = configuration.maxRecordingSeconds
             deadline = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(maximumSeconds)) }
+                do { try await Task.sleep(for: .seconds(maximumSeconds), tolerance: .zero) }
                 catch { return }
                 // finish cancels a pending deadline; this deadline has already fired.
                 self?.deadline = nil

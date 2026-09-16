@@ -114,7 +114,9 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
             log.notice("Recording \(note.id, privacy: .public)")
             let maximumSeconds = maxRecordingSeconds
             deadline = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(maximumSeconds)); self?.finish(recordingError: nil) } catch { }
+                do { try await Task.sleep(for: .seconds(maximumSeconds), tolerance: .zero) }
+                catch { return }
+                self?.finish(recordingError: nil)
             }
         } catch { self.error = error.localizedDescription }
     }
