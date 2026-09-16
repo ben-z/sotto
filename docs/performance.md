@@ -10,6 +10,17 @@ The [September 8 live app report](performance-results.md) is a separate real-mic
 
 Live runs produce `report.md`, `report.json`, and `samples.json` in timestamped directories under `work/performance/`. Reports include machine/OS, executable hash, source revision/dirty state, model, and actual audio duration/size. Do not publish partial or failed runs as baselines.
 
+## Protocol v2 baseline
+
+[Successful CI run](https://github.com/ben-z/sotto/actions/runs/35049546891), September 16, 2026. The measured source was GitHub's clean PR merge commit `adda78dc9ec33d0473e9d2709b9d10de816032cf`, combining base `4dd044b` with PR head `3c54933`. These unmodified JSON snapshots preserve the exact measured revision, fixture hashes, limits, environment, and workflow URL after artifacts expire.
+
+| Runner | Idle median before / after (MiB) | Short / long / three-hour upload peak (MiB) | Warm-up peak (MiB) | Packaged app bytes |
+| --- | ---: | ---: | ---: | ---: |
+| [arm64 report](benchmarks/adda78d/arm64.json) | 5.0 / 5.1 | 5.1 / 5.1 / 6.0 | 9.1 | 1,612,174 |
+| [x86_64 report](benchmarks/adda78d/x86_64.json) | 7.3 / 8.5 | 8.5 / 8.5 / 8.5 | 7.3 | 1,617,358 |
+
+Both architectures completed all 84 requests and passed every budget. Retained median growth was 0.19 MiB on arm64 and 1.20 MiB on x86_64. These are sampled physical-footprint measurements of the production core fixture workload described below, not the complete app. Both used macOS 15.7.9, Xcode 16.4, and Swift 6.1.2; image versions are in the snapshots. Compare future v2 results against the same architecture; the [original v1 baseline](ci-performance-baseline.md) remains historical context.
+
 ## Run the automated live test
 
 1. Build and launch Sotto. Complete Keychain and microphone authorization in **Status**, and verify the Groq connection. The benchmark requires a real key, microphone, internet connection, and working Groq transcription quota.
@@ -55,7 +66,7 @@ The host has an eight-minute workload deadline within a 20-minute CI job. Hosted
 ### Regression tracking
 
 - **September 16, 2026 — multipart temporary buffers:** bounded `FileHandle` reads still accumulated autoreleased Foundation buffers on concurrency threads. In the local v1 workload, releasing buffers per block reduced sampled peak footprint from 52.6 to 12.7 MiB and retained growth from 24.3 to 4.7 MiB. The per-block pool is covered by the resource gate; do not remove it without an equivalent measured result.
-- **Protocol v2 — long recordings:** added the three-hour fixture so loading entire recordings, retaining decoded audio across parts, and incomplete chunk cleanup are visible to CI. Budgets were tightened from 96/128/24 MiB to 64/96/16 MiB for idle/active/growth. Baseline snapshots belong under `docs/benchmarks/` and must include their workflow URL. Do not relabel v1 results as v2.
+- **Protocol v2 — long recordings:** added the three-hour fixture so loading entire recordings, retaining decoded audio across parts, and incomplete chunk cleanup are visible to CI. Budgets were tightened from 96/128/24 MiB to 64/96/16 MiB for idle/active/growth. The [arm64](benchmarks/adda78d/arm64.json) and [x86_64](benchmarks/adda78d/x86_64.json) baseline snapshots under `docs/benchmarks/` include their workflow URL. Do not relabel v1 results as v2.
 - Keep budgets and protocol changes in reviewable commits. A regression requires investigation; raising limits is not the default fix. `AGENTS.md` carries this requirement into future coding tasks.
 
 Build the CI app and run locally with:

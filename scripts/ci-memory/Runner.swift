@@ -15,7 +15,7 @@ struct MemoryWorkload {
         let result = try await client.transcribe(file: archive.audioURL(record), key: "benchmark-fixture-key",
             model: record.model, language: record.language, prompt: "")
         let parts = name == "chunked" ? 19 : 1
-        let expected = Array(repeating: " Sotto benchmark fixture. ", count: parts).joined(separator: "\n")
+        let expected = Array(repeating: " Sotto benchmark fixture. ", count: parts).joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard result.text == expected else { throw SottoError("Unexpected fixture response or missing upload parts") }
         try archive.complete(&record, with: result)

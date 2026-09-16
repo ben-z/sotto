@@ -113,7 +113,7 @@ public struct GroqClient: Sendable {
             }
             try FileManager.default.removeItem(at: chunk)
         }
-        let text = texts.filter { !$0.isEmpty }.joined(separator: "\n")
+        let text = texts.joined()
         // Preserve each unmodified API response and its offset in a Sotto envelope.
         let raw = try JSONSerialization.data(withJSONObject: ["text": text, "chunks": responses], options: [.sortedKeys])
         return (text, raw, nil)

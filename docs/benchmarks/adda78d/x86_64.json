@@ -1,0 +1,87 @@
+{
+  "protocol_version": 2,
+  "workload": "optimized production core with deterministic loopback HTTP fixture; not the menu-bar app",
+  "commit": "adda78dc9ec33d0473e9d2709b9d10de816032cf",
+  "dirty": false,
+  "runner": "GitHub Actions 1000004635",
+  "architecture": "x86_64",
+  "macos": "15.7.9",
+  "image": "20260824.0482.1",
+  "swift": "swift-driver version: 1.120.5 Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)\nTarget: x86_64-apple-macosx15.0",
+  "fixtures": {
+    "short": {
+      "seconds": 60,
+      "bytes": 1920044,
+      "sha256": "4c59ed976769ba50aba4a23ef2823cf795f0b555d48f4c80d41576ce9f3378b7"
+    },
+    "long": {
+      "seconds": 600,
+      "bytes": 19200044,
+      "sha256": "e14ff9e3be3d5257e57c029ea807754eaf22d1104999d69db4ec9e50e7c674d4"
+    },
+    "chunked": {
+      "seconds": 10800,
+      "bytes": 345600044,
+      "sha256": "fe646ba1e8b21fdc13902d9ab0ee8d78471f1b8a9b69755ed62ff6a0a6f37f83"
+    }
+  },
+  "summary": {
+    "warmup": {
+      "samples": 2967,
+      "sampled_seconds": 62.822493070000064,
+      "footprint_median_mib": 7.1484375,
+      "footprint_peak_mib": 7.30859375,
+      "rss_peak_mib": 12.1484375,
+      "cpu_percent": 2.923355265372308
+    },
+    "idle_before": {
+      "samples": 238,
+      "sampled_seconds": 5.049687891999952,
+      "footprint_median_mib": 7.30859375,
+      "footprint_peak_mib": 7.30859375,
+      "rss_peak_mib": 12.15625,
+      "cpu_percent": 0.0032529337161666884
+    },
+    "short_upload": {
+      "samples": 98,
+      "sampled_seconds": 2.0203346400002147,
+      "footprint_median_mib": 7.31640625,
+      "footprint_peak_mib": 8.4609375,
+      "rss_peak_mib": 13.45703125,
+      "cpu_percent": 1.8878577461798889
+    },
+    "long_upload": {
+      "samples": 453,
+      "sampled_seconds": 9.590649008000014,
+      "footprint_median_mib": 7.33203125,
+      "footprint_peak_mib": 8.4609375,
+      "rss_peak_mib": 13.45703125,
+      "cpu_percent": 1.9020960609426125
+    },
+    "chunked_upload": {
+      "samples": 8781,
+      "sampled_seconds": 186.71289880999996,
+      "footprint_median_mib": 7.43359375,
+      "footprint_peak_mib": 8.5078125,
+      "rss_peak_mib": 13.5234375,
+      "cpu_percent": 5.088913746483546
+    },
+    "idle_after": {
+      "samples": 243,
+      "sampled_seconds": 5.226496107000003,
+      "footprint_median_mib": 8.5078125,
+      "footprint_peak_mib": 8.5078125,
+      "rss_peak_mib": 13.5390625,
+      "cpu_percent": 0.013966737658571877
+    }
+  },
+  "limits": {
+    "idle_peak_mib": 64,
+    "active_peak_mib": 96,
+    "idle_growth_mib": 16,
+    "bundle_mib": 2
+  },
+  "failures": [],
+  "bundle_bytes": 1617358,
+  "run_url": "https://github.com/ben-z/sotto/actions/runs/35049546891"
+}

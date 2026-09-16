@@ -7,12 +7,17 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var requests = 0
     nonisolated(unsafe) private static var failingRequest: Int?
     nonisolated(unsafe) private static var blockedRequest: Int?
-    static func reset(failingRequest: Int? = nil, blockedRequest: Int? = nil) {
-        lock.withLock { requests = 0; self.failingRequest = failingRequest; self.blockedRequest = blockedRequest }
+    nonisolated(unsafe) private static var payloads: [String] = []
+    static func reset(failingRequest: Int? = nil, blockedRequest: Int? = nil, payloads: [String] = []) {
+        lock.withLock {
+            requests = 0; self.failingRequest = failingRequest; self.blockedRequest = blockedRequest
+            self.payloads = payloads
+        }
     }
     static var count: Int { lock.withLock { requests } }
     static func payload(_ index: Int) -> String {
-        """
+        if let custom = lock.withLock({ index <= payloads.count ? payloads[index - 1] : nil }) { return custom }
+        return """
         {"text":" Part \(index). ","words":[{"word":"Part","start":10,"end":10.5},{"word":"\(index).","start":10.5,"end":11}]}
         """
     }
@@ -184,7 +189,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         UploadFixture.reset()
         let result = try await transcribe(source)
         try expect(UploadFixture.count == 2, "Expected two uploads")
-        try expect(result.text == "Part 1. \n Part 2.", "Transcript order or trimming changed")
+        try expect(result.text == "Part 1.  Part 2.", "Transcript order or trimming changed")
         let raw = try JSONSerialization.jsonObject(with: result.rawResponse) as! [String: Any]
         let responses = raw["chunks"] as! [[String: Any]]
         try expect(responses.count == 2 && responses[1]["start_seconds"] as? Double == 598, "Missing chunk offsets")
@@ -192,6 +197,33 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try expect(responses[0]["request_id"] as? String == "part-1", "Missing request IDs")
         try expect((responses[0]["response"] as? [String: Any])?["text"] as? String == " Part 1. ", "Raw response changed")
         try expect(try temporaryUploads() == uploadsBefore, "Temporary uploads leaked on success")
+
+        // Exercise reconciliation and joining through the actual upload path.
+        // The overlapping word belongs to part two; only the API's spacing survives.
+        for (first, second, expected) in [
+            ("Hello, splitword", "splitword again again.", "Hello, splitword again again."),
+            ("Hello,\nsplitword", "splitword again again.", "Hello,\nsplitword again again."),
+            ("你好世界", "世界再见", "你好世界再见")
+        ] {
+            let chinese = first.hasPrefix("你好")
+            let payloads: [[String: Any]] = [
+                ["text": first, "words": [
+                    ["word": chinese ? "你好" : "Hello,", "start": 597, "end": 598],
+                    ["word": chinese ? "世界" : "splitword", "start": 598.7, "end": 599.5]
+                ]],
+                ["text": second, "words": [
+                    ["word": chinese ? "世界" : "splitword", "start": 0.7, "end": 1.5],
+                    ["word": chinese ? "再见" : "again", "start": 2, "end": 2.5]
+                ]]
+            ]
+            UploadFixture.reset(payloads: try payloads.map {
+                String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self)
+            })
+            let joined = try await transcribe(source)
+            try expect(UploadFixture.count == 2 && joined.text == expected, "Chunk joining changed boundary whitespace")
+            let envelope = try JSONSerialization.jsonObject(with: joined.rawResponse) as! [String: Any]
+            try expect(envelope["text"] as? String == expected, "Saved transcript differs from joined text")
+        }
 
         UploadFixture.reset()
         let short = try await transcribe(compressed, trimWhitespace: false)
