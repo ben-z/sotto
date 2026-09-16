@@ -15,6 +15,48 @@ final class NotesUITests: XCTestCase {
         XCTAssertEqual(location.value as? String, "1", "Location capture must be enabled before testing it")
     }
 
+    func testRecordingLimitPersistsAndStopsAtCapturedDeadline() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        func openLimit() -> XCUIElement {
+            app.buttons["Settings"].tap()
+            let field = app.textFields["Maximum recording duration in minutes"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            return field
+        }
+        func enter(_ value: String, into field: XCUIElement) {
+            field.doubleTap()
+            field.typeText(value)
+            app.buttons["Done"].tap()
+        }
+        let limit = openLimit()
+        if app.buttons["Reset to 3 hours"].isEnabled { app.buttons["Reset to 3 hours"].tap() }
+        XCTAssertEqual(limit.value as? String, "180")
+        enter("1", into: limit)
+        app.terminate(); app.launch()
+        XCTAssertEqual(openLimit().value as? String, "1")
+        app.buttons["Done"].tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved"))
+        let previousID = saved.firstMatch.exists ? saved.firstMatch.identifier : ""
+        app.buttons["record-note"].tap()
+        XCTAssertTrue(app.buttons["Stop recording"].waitForExistence(timeout: 10))
+        _ = openLimit()
+        app.buttons["Reset to 3 hours"].tap()
+        XCTAssertEqual(limit.value as? String, "180")
+        app.buttons["Done"].tap()
+        let stopped = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !app.buttons["Stop recording"].exists && saved.firstMatch.exists && saved.firstMatch.identifier != previousID
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 70), .completed,
+                       "Changing Settings must not extend the active recording's one-minute deadline")
+        saved.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "0:59|1:0[0-2]")).firstMatch.waitForExistence(timeout: 5),
+                      "The one-minute recording must not gain several seconds of timer tolerance")
+        app.terminate(); app.launch()
+        XCTAssertEqual(openLimit().value as? String, "180")
+        app.buttons["Done"].tap()
+    }
+
     func testLanguageSelectionPersists() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
@@ -188,6 +230,7 @@ final class NotesUITests: XCTestCase {
     func testRejectedKeyIsNotSaved() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments = ["--reject-key-check"]
         app.launch()
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
         app.buttons["Settings"].tap()
@@ -197,11 +240,12 @@ final class NotesUITests: XCTestCase {
         let save = app.buttons["Save and check key"]
         XCTAssertTrue(save.isEnabled)
         save.tap()
-        XCTAssertTrue(app.staticTexts["Key rejected by Groq (HTTP 401). Check the API key and try again."].waitForExistence(timeout: 25), "The live Groq key check must reject the test key")
+        XCTAssertTrue(app.staticTexts["Key verification rejected by the UI-test fixture."].waitForExistence(timeout: 5))
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Rejected Groq key"; attachment.lifetime = .keepAlways
         add(attachment)
-        app.buttons["Done"].tap()
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.secureTextFields["Groq API key"].waitForExistence(timeout: 5))
     }

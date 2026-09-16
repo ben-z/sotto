@@ -100,7 +100,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
         duration.setAccessibilityLabel("Maximum recording duration in seconds")
         duration.delegate = self
         bitrate.textColor = .secondaryLabelColor
-        let durationRow = NSStackView(views: [duration, label("seconds · 1–3,600")])
+        let durationRow = NSStackView(views: [duration, label("seconds · up to 24 hours")])
         durationRow.orientation = .horizontal; durationRow.spacing = 8
         let grid = NSGridView(views: [
             [label("Version"), versionRow, NSGridCell.emptyContentView],
@@ -112,7 +112,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
             settingRow("Recordings", control: folderRow, caption: "~/Documents/Sotto", matches: { $0.recordingsURL.standardizedFileURL == d.recordingsURL.standardizedFileURL }, reset: { $0.recordingsDirectory = d.recordingsDirectory }),
             settingRow("Output", control: paste, caption: "Paste into the active app", matches: { $0.paste == d.paste }, reset: { $0.paste = d.paste }),
             settingRow("Text", control: trim, caption: "Trim surrounding whitespace", matches: { $0.trimWhitespace == d.trimWhitespace }, reset: { $0.trimWhitespace = d.trimWhitespace }),
-            settingRow("Recording limit", control: durationRow, caption: "\(Int(d.maxRecordingSeconds)) seconds", matches: { $0.maxRecordingSeconds == d.maxRecordingSeconds }, reset: { $0.maxRecordingSeconds = d.maxRecordingSeconds }),
+            settingRow("Recording limit", control: durationRow, caption: "3 hours (10,800 seconds)", matches: { $0.maxRecordingSeconds == d.maxRecordingSeconds }, reset: { $0.maxRecordingSeconds = d.maxRecordingSeconds }),
             [label("Audio format"), bitrate, NSGridCell.emptyContentView],
             settingRow("Updates", control: automaticUpdates, caption: "Automatic · launch and daily", matches: { $0.automaticUpdateChecks == d.automaticUpdateChecks }, reset: { $0.automaticUpdateChecks = d.automaticUpdateChecks })
         ])
@@ -295,9 +295,6 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTabViewDeleg
     @objc private func save() {
         let config = editedConfiguration
         do {
-            guard (1...3600).contains(config.maxRecordingSeconds) else {
-                throw SottoError("Recording limit must be a number between 1 and 3,600 seconds.")
-            }
             try saveConfiguration(config); close()
         }
         catch { showError(error.localizedDescription) }

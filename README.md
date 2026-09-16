@@ -68,6 +68,10 @@ Click the bird to see the current state, stop or cancel a recording, copy the la
 
 Open **Settings…** from the menu. Choose your language, Whisper model, recording folder, recording duration, toggle or hold mode, auto-paste, and whitespace trimming. To change the shortcut, click it and press a new combination; Escape cancels shortcut entry.
 
+The recording limit defaults to **3 hours**. Set **Recording limit** to 1–86,400 seconds (up to 24 hours), or edit `maxRecordingSeconds` in the configuration file. Existing saved limits are preserved; use the row’s **Reset** button to adopt the new default.
+
+Recordings at or above 25 MB are transcribed in sequential, bounded audio chunks to stay below [Groq’s 25 MB direct-upload limit](https://console.groq.com/docs/speech-to-text). Chunks cover the audio consecutively, prefer pauses near boundaries, and use preceding-text context when no explicit prompt is supplied. Each part becomes a paragraph; uninterrupted speech can still be cut mid-word. See the [design and tradeoffs](docs/long-recordings.md). Smaller imports upload directly, including formats macOS cannot decode. The original audio stays intact. Successful chunked transcriptions save one combined transcript and a `.response.json` containing each API response, request ID, and time offset. [Groq account quotas](https://console.groq.com/docs/rate-limits) still apply: the published free-tier allowance is 7,200 audio seconds per hour and 28,800 per day. A 3-hour transcription can exceed the hourly quota. Quota/network failures stop transcription and retain the recording; manually retrying starts from the beginning and can bill already processed parts again.
+
 Each editable setting shows its default and marks overrides. **Reset** changes one setting; **Reset All to Defaults** changes them all. Choose **Save Changes** to apply, or **Cancel** to discard. Resets keep your key and existing recordings. Command–W closes Settings; Escape leaves it open.
 
 <details>

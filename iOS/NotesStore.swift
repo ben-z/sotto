@@ -40,6 +40,10 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     private var scopedFolder: URL?
     private let bookmarkURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Sotto/folder.bookmark")
     var model: String { UserDefaults.standard.string(forKey: "notes.model") ?? "whisper-large-v3-turbo" }
+    var maxRecordingSeconds: Double {
+        let saved = UserDefaults.standard.double(forKey: "notes.maxRecordingSeconds")
+        return Configuration.recordingSecondsRange.contains(saved) ? saved : Configuration.defaultMaxRecordingSeconds
+    }
     var language: String? {
         let value = UserDefaults.standard.string(forKey: "notes.language") ?? "en"
         return value.isEmpty ? nil : value
@@ -108,8 +112,11 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
             recording = note
             captureLocation(for: note)
             log.notice("Recording \(note.id, privacy: .public)")
+            let maximumSeconds = maxRecordingSeconds
             deadline = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(1800)); self?.finish(recordingError: nil) } catch { }
+                do { try await Task.sleep(for: .seconds(maximumSeconds), tolerance: .zero) }
+                catch { return }
+                self?.finish(recordingError: nil)
             }
         } catch { self.error = error.localizedDescription }
     }

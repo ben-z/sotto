@@ -198,11 +198,30 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("notes.model") private var model = "whisper-large-v3-turbo"
     @AppStorage("notes.language") private var language = "en"
+    @AppStorage("notes.maxRecordingSeconds") private var maxRecordingSeconds = Configuration.defaultMaxRecordingSeconds
     @State private var key = ""
     @State private var folderPicker = false
     @State private var folderError: String?
     @State private var checking = false
     @State private var keyResult: Result<String, Error>?
+
+    private func verifyKey(_ candidate: String) async throws {
+        #if DEBUG && targetEnvironment(simulator)
+        // UI tests cover presentation/persistence; core tests cover HTTP parsing.
+        if ProcessInfo.processInfo.arguments.contains("--reject-key-check") {
+            throw SottoError("Key verification rejected by the UI-test fixture.")
+        }
+        #endif
+        try await GroqClient().verifyKey(candidate, model: model)
+    }
+
+    private var recordingMinutes: Binding<Int> {
+        Binding(get: { Int(maxRecordingSeconds / 60) }, set: { minutes in
+            let seconds = Double(max(minutes, 1)) * 60
+            maxRecordingSeconds = min(seconds, Configuration.recordingSecondsRange.upperBound)
+        })
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -215,7 +234,7 @@ struct SettingsView: View {
                             checking = true; keyResult = nil
                             defer { checking = false }
                             do {
-                                try await GroqClient().verifyKey(candidate, model: model)
+                                try await verifyKey(candidate)
                                 try GroqKeychain.save(candidate); key = ""; store.refreshKey()
                                 keyResult = .success("Key verified and saved. Queued recordings will transcribe automatically.")
                             } catch { keyResult = .failure(error) }
@@ -242,6 +261,20 @@ struct SettingsView: View {
                         Text("whisper-large-v3").tag("whisper-large-v3")
                     }
                 } footer: { Text("Applies to new recordings. Audio is sent to Groq for transcription using your key.") }
+                Section("Recording limit") {
+                    Stepper(value: recordingMinutes, in: 1...Int(Configuration.recordingSecondsRange.upperBound / 60)) {
+                        HStack {
+                            Text("Maximum")
+                            TextField("Minutes", value: recordingMinutes, format: .number)
+                                .keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                                .accessibilityLabel("Maximum recording duration in minutes")
+                            Text("minutes")
+                        }
+                    }
+                    Button("Reset to 3 hours") { maxRecordingSeconds = Configuration.defaultMaxRecordingSeconds }
+                        .disabled(maxRecordingSeconds == Configuration.defaultMaxRecordingSeconds)
+                    Text("Applies to new recordings. Default: 180 minutes (3 hours). Groq account quotas still apply to transcription.").font(.caption).foregroundStyle(.secondary)
+                }
                 Section {
                     Toggle("Save recording location", isOn: $store.locationEnabled)
                     if let message = store.locationMessage { Text(message).font(.caption).foregroundStyle(.secondary) }

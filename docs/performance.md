@@ -10,6 +10,41 @@ The [September 8 live app report](performance-results.md) is a separate real-mic
 
 Live runs produce `report.md`, `report.json`, and `samples.json` in timestamped directories under `work/performance/`. Reports include machine/OS, executable hash, source revision/dirty state, model, and actual audio duration/size. Do not publish partial or failed runs as baselines.
 
+## Protocol v4 baseline
+
+The [contiguous-chunk design](long-recordings.md) replaces transcript overlap reconciliation with pause-aware audio partitioning and paragraph assembly. V4 uses 18 parts per three-hour recording and 80 total uploads. Audio fixture bytes are unchanged from v3; response offsets and the expected paragraph output change. Speech-heavy response metadata is deliberately retained to keep the response-archive memory stress. The fixture server also checks bounded preceding-text context and the absence of word-timestamp requests. Memory budgets are unchanged. The [local arm64 v4 report](benchmarks/6a26011/local-arm64.json) completed all 80 uploads: 19.8 MiB sampled peak, idle median 19.4 → 14.0 MiB, and 1,636,148 packaged app bytes. It used macOS 26.2 and Swift 6.3.3 at `6a26011`; the report records a dirty tree because the AAC sample-continuity test was being strengthened during measurement. Production core and benchmark sources were unchanged. This is local validation, not a hosted-runner baseline. V2/v3 snapshots below remain historical.
+
+[Successful v4 CI run](https://github.com/ben-z/sotto/actions/runs/35058639668), September 16, 2026. The measured source was clean PR merge commit `7db28c2433850b20c85e0c05413b1cd1ef493575`, combining base `4dd044b4bf490bdd20ec6c8a24d8824795c56efa` and PR head `6a260116feb613de3e4787a1da53892237d853cf`. Both jobs passed all tests and resource gates. The unmodified reports preserve fixture hashes, budgets, environment, and workflow URL.
+
+| Runner | Idle median before / after (MiB) | Short / long / three-hour upload peak (MiB) | Warm-up peak (MiB) | Packaged app bytes |
+| --- | ---: | ---: | ---: | ---: |
+| [arm64 report](benchmarks/7db28c2/arm64.json) | 5.9 / 5.4 | 6.2 / 6.1 / 9.7 | 11.0 | 1,592,126 |
+| [x86_64 report](benchmarks/7db28c2/x86_64.json) | 8.6 / 8.9 | 8.8 / 11.2 / 13.5 | 11.3 | 1,593,038 |
+
+Both architectures completed all 80 uploads and verified 64,800 words as 18 paragraphs per three-hour transcription. Retained median changed by -0.50 MiB on arm64 and +0.36 MiB on Intel. Both used macOS 15.7.9, Xcode 16.4, and Swift 6.1.2; runner images were `20260907.0337.1` (arm64) and `20260824.0482.1` (Intel). Compare future v4 reports against the same architecture. These are production-core workload measurements, not full-app memory claims.
+
+## Protocol v3 baseline (historical)
+
+[Successful CI run](https://github.com/ben-z/sotto/actions/runs/35052182787), September 16, 2026. The measured source was clean PR merge commit `3076de4a0ecd35340289cb5fcd5b6af2a57c834d`, combining base `4dd044b` with PR head `a8400a3`. These unmodified snapshots include audio and response hashes, memory budgets, environment, deadline, and workflow URL.
+
+| Runner | Idle median before / after (MiB) | Short / long / three-hour upload peak (MiB) | Warm-up peak (MiB) | Packaged app bytes |
+| --- | ---: | ---: | ---: | ---: |
+| [arm64 report](benchmarks/3076de4/arm64.json) | 7.9 / 5.4 | 8.8 / 7.8 / 10.5 | 10.1 | 1,641,182 |
+| [x86_64 report](benchmarks/3076de4/x86_64.json) | 10.4 / 10.7 | 11.3 / 11.6 / 12.8 | 11.3 | 1,646,366 |
+
+Both architectures completed all 84 uploads, verified 64,800 unique words per three-hour transcript, and passed every budget. Idle median fell by 2.53 MiB on arm64 and grew by 0.30 MiB on Intel. These are sampled physical-footprint measurements of the optimized production core, not the full app. Compare future v3 results with the same architecture; v2 below used sparse responses and is historical context.
+
+## Protocol v2 baseline
+
+[Successful CI run](https://github.com/ben-z/sotto/actions/runs/35049546891), September 16, 2026. The measured source was GitHub's clean PR merge commit `adda78dc9ec33d0473e9d2709b9d10de816032cf`, combining base `4dd044b` with PR head `3c54933`. These unmodified JSON snapshots preserve the exact measured revision, fixture hashes, limits, environment, and workflow URL after artifacts expire.
+
+| Runner | Idle median before / after (MiB) | Short / long / three-hour upload peak (MiB) | Warm-up peak (MiB) | Packaged app bytes |
+| --- | ---: | ---: | ---: | ---: |
+| [arm64 report](benchmarks/adda78d/arm64.json) | 5.0 / 5.1 | 5.1 / 5.1 / 6.0 | 9.1 | 1,612,174 |
+| [x86_64 report](benchmarks/adda78d/x86_64.json) | 7.3 / 8.5 | 8.5 / 8.5 / 8.5 | 7.3 | 1,617,358 |
+
+Both architectures completed all 84 requests and passed every budget. Retained median growth was 0.19 MiB on arm64 and 1.20 MiB on x86_64. These are sampled physical-footprint measurements of the production core fixture workload described below, not the complete app. Both used macOS 15.7.9, Xcode 16.4, and Swift 6.1.2; image versions are in the snapshots. Compare future v2 results against the same architecture; the [original v1 baseline](ci-performance-baseline.md) remains historical context.
+
 ## Run the automated live test
 
 1. Build and launch Sotto. Complete Keychain and microphone authorization in **Status**, and verify the Groq connection. The benchmark requires a real key, microphone, internet connection, and working Groq transcription quota.
@@ -44,9 +79,21 @@ The interval is 20 ms by default. Samples can miss shorter spikes, so a transcri
 
 `python3 scripts/benchmark-ci.py` builds a separate optimized Swift test host directly from the production `SottoCore` sources. An internal endpoint initializer points only that test host at a loopback HTTP fixture; the app's public initializer still uses Groq HTTPS. No benchmark host, fixture, server, or sampler ships in the app.
 
-The test generates byte-identical mono 16 kHz PCM WAV files of 60 seconds (1,920,044 bytes) and 600 seconds (19,200,044 bytes); their SHA-256 hashes are recorded. It runs one short/long warm-up pair, measures five seconds idle, runs three short/long pairs, then measures five more seconds idle. Warm-up is reported separately so lazy framework loading is not mistaken for retained growth. Each request exercises the actual multipart writer, file upload, response parsing/trimming, and archive completion. The server validates the endpoint, fixture credential, size, multipart fields, and WAV header, consumes 64 KiB chunks with 2 ms pacing, waits 250 ms, and returns a fixed response. It performs no inference.
+Protocol v4 generates byte-identical mono 16 kHz PCM WAV files of 60 seconds (1,920,044 bytes), 600 seconds (19,200,044 bytes), and three hours (345,600,044 bytes). It warms every workload, measures five seconds idle, runs three cycles of all three, then measures five more seconds idle. The three-hour fixture forces 18 contiguous upload parts and exercises the production decoder, pause scan, preceding-text context, multipart writer, upload, and archive. All 80 requests must finish; missing parts or phases fail the run. The loopback server validates the request and WAV size, consumes 64 KiB blocks with 2 ms pacing, and returns deterministic timestamped text after 250 ms. Responses contain six words per second with rich timestamp metadata: a three-hour transcript has 64,800 unique words. The host verifies the complete expected transcript, and reports include response sizes and hashes. This exercises realistic response growth as well as audio streaming. No audio leaves the machine.
 
-Physical footprint limits are 96 MiB idle, 128 MiB active, and 24 MiB retained median growth. Native packaged app file bytes must stay under 2 MiB. Exceeding a limit or failing the workload fails CI. CPU is measured using Mach timebase conversion, but is not gated because hosted-runner scheduling is noisy. CI pins Xcode 16.4 and the macOS 15 runner labels, and fails if that toolchain is absent. Reports identify the exact commit, runner image, architecture, OS, Swift compiler, fixture hashes, and workflow URL. Runner images evolve, so compare within the same architecture/image; this is a controlled protocol, not a permanently identical machine.
+Memory and size budgets live in [`scripts/ci-memory/budgets.json`](../scripts/ci-memory/budgets.json): **64 MiB idle peak, 96 MiB active peak, 16 MiB retained median growth, and 2 MiB packaged app size**. These ceilings apply on both Apple Silicon and Intel. The accounting tests deliberately exceed every budget, including the chunked phase, and verify rejection. The full workload exits nonzero when any budget is exceeded. CPU is reported but not gated because hosted scheduling is noisy.
+
+Every PR and main push runs the benchmark with pinned Xcode 16.4. Job summaries show phase measurements; `resource-usage-macos-15` and `resource-usage-macos-15-intel` retain the Markdown report, JSON report, and raw samples for 90 days. Reports include protocol version, commit and dirty state, runner image, architecture, OS/compiler, fixture hashes, budgets, and workflow URL. Compare like architectures and protocols; historical v3 had overlapping parts, while the original v1 baseline did not exercise decoding or chunking.
+
+The host has a 15-minute workload deadline within a 30-minute CI job, leaving 15 minutes for checkout, builds, other tests, artifact uploads, and cleanup. The v2 arm64 baseline spent 457.6 seconds in sampled phases; the previous eight-minute deadline left less than 5% headroom. The 15-minute deadline allows nearly twice that measured duration without relaxing any memory limit. Hosted pacing can make the 80-request workload substantially slower than a local run. Timeouts still fail CI and publish an explicitly incomplete failure report with partial samples; they never count as successful baselines.
+
+### Regression tracking
+
+- **September 16, 2026 — multipart temporary buffers:** bounded `FileHandle` reads still accumulated autoreleased Foundation buffers on concurrency threads. In the local v1 workload, releasing buffers per block reduced sampled peak footprint from 52.6 to 12.7 MiB and retained growth from 24.3 to 4.7 MiB. The per-block pool is covered by the resource gate; do not remove it without an equivalent measured result.
+- **Protocol v2 — long recordings:** added the three-hour fixture so loading entire recordings, retaining decoded audio across parts, and incomplete chunk cleanup are visible to CI. Budgets were tightened from 96/128/24 MiB to 64/96/16 MiB for idle/active/growth. The [arm64](benchmarks/adda78d/arm64.json) and [x86_64](benchmarks/adda78d/x86_64.json) baseline snapshots under `docs/benchmarks/` include their workflow URL. Do not relabel v1 results as v2.
+- **Protocol v3 — speech-heavy responses:** the v2 server returned only three words per part, hiding growth from retaining all word dictionaries. Raw part responses now spool directly to disk, and the completed envelope uses a file-backed mapping. Only the neighboring decoded transcripts are kept for overlap reconciliation. V3 returns six words per second and verifies all 64,800 words in each three-hour transcript; the existing memory budgets are unchanged. In a local arm64 comparison using the same v3 fixture, the prior response handling peaked at 36.8 MiB and the streaming implementation at 22.7 MiB. Both passed the absolute budgets; these ceilings catch large regressions, while versioned reports expose changes below the ceilings. The [arm64](benchmarks/3076de4/arm64.json) and [x86_64](benchmarks/3076de4/x86_64.json) v3 baselines above preserve the successful speech-heavy measurements; v2 remains historical evidence.
+- **Protocol v4 — simpler chunk ownership:** removes word reconciliation and partitions the decoded audio exactly once. The three-hour workload still validates all 64,800 words, now as 18 paragraphs; total uploads fall from 84 to 80. Rich raw responses, the per-block autorelease pool, cancellation/quota tests, and every memory budget remain intact. See [the design contract](long-recordings.md).
+- Keep budgets and protocol changes in reviewable commits. A regression requires investigation; raising limits is not the default fix. `AGENTS.md` carries this requirement into future coding tasks.
 
 Build the CI app and run locally with:
 
@@ -56,4 +103,4 @@ python3 scripts/test-benchmark.py
 python3 scripts/benchmark-ci.py
 ```
 
-The nine accounting/preflight tests run on both CI architectures, including native process sampling, CPU timer conversion against kernel wait accounting, phase arithmetic, missing phases, memory limits, and process identity protection. The live app benchmark remains a separate integration check of permissions, microphone, UI, and Groq. Its numbers are not substituted for CI's core-workload results, and core-workload numbers are not advertised as the entire app's footprint.
+The accounting/preflight tests run on both CI architectures, including native process sampling, CPU timer conversion against kernel wait accounting, phase arithmetic, missing phases, memory limits, and process identity protection. The live app benchmark remains a separate integration check of permissions, microphone, UI, and Groq. Its numbers are not substituted for CI's core-workload results, and core-workload numbers are not advertised as the entire app's footprint.

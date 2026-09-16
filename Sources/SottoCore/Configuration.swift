@@ -7,6 +7,8 @@ public struct SottoError: LocalizedError, Sendable {
 }
 
 public struct Configuration: Codable, Sendable, Equatable {
+    public static let defaultMaxRecordingSeconds: Double = 3 * 60 * 60
+    public static let recordingSecondsRange: ClosedRange<Double> = 1...(24 * 60 * 60)
     public var recordingsDirectory: String
     public var model = "whisper-large-v3-turbo"
     public var language: String? = "en"
@@ -16,7 +18,7 @@ public struct Configuration: Codable, Sendable, Equatable {
     public var hotkeyKeyCode: UInt32 = 1 // S
     public var hotkeyModifiers: UInt32 = 4352 // Control + Command (Carbon masks)
     public var hotkeyMode = "hold" // or toggle
-    public var maxRecordingSeconds: Double = 1800
+    public var maxRecordingSeconds: Double = Self.defaultMaxRecordingSeconds
     public var audioBitRate = 32000
 
     public init(recordingsDirectory: String) { self.recordingsDirectory = recordingsDirectory }
@@ -34,7 +36,7 @@ public struct Configuration: Codable, Sendable, Equatable {
         hotkeyKeyCode = try values.decode(UInt32.self, forKey: .hotkeyKeyCode)
         hotkeyModifiers = try values.decode(UInt32.self, forKey: .hotkeyModifiers)
         hotkeyMode = try values.decode(String.self, forKey: .hotkeyMode)
-        maxRecordingSeconds = try values.decode(Double.self, forKey: .maxRecordingSeconds)
+        maxRecordingSeconds = try values.decodeIfPresent(Double.self, forKey: .maxRecordingSeconds) ?? Self.defaultMaxRecordingSeconds
         audioBitRate = try values.decode(Int.self, forKey: .audioBitRate)
         automaticUpdateChecks = try values.decodeIfPresent(Bool.self, forKey: .automaticUpdateChecks) ?? true
         trimWhitespace = try values.decodeIfPresent(Bool.self, forKey: .trimWhitespace) ?? true
@@ -50,8 +52,11 @@ public struct Configuration: Codable, Sendable, Equatable {
         guard ["toggle", "hold"].contains(hotkeyMode), hotkeyModifiers != 0, hotkeyKeyCode <= 127 else {
             throw SottoError("Invalid hotkey configuration. Use toggle/hold, a key code in 0...127, and nonzero Carbon modifier flags.")
         }
-        guard (1...3600).contains(maxRecordingSeconds), (16000...128000).contains(audioBitRate) else {
-            throw SottoError("Invalid limits: recording 1...3600 seconds, bitrate 16000...128000.")
+        guard Self.recordingSecondsRange.contains(maxRecordingSeconds) else {
+            throw SottoError("Recording limit must be a number between 1 and 86,400 seconds (24 hours).")
+        }
+        guard (16000...128000).contains(audioBitRate) else {
+            throw SottoError("Audio bitrate must be between 16,000 and 128,000.")
         }
         if let language, language.count != 2 || !language.allSatisfy({ $0.isASCII && $0.isLowercase }) {
             throw SottoError("language must be a two-letter lowercase ISO code, or null for detection.")

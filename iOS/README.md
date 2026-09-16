@@ -24,7 +24,9 @@ The Groq key is stored in the device’s Keychain. Transcription sends the recor
 
 ## Action Button
 
-Choose **Settings → Action Button → Shortcut → Sotto → Record a voice note**. The App Shortcut opens Sotto and starts recording; running it again stops and saves. The audio background mode keeps an active recording running when you leave the app or lock your phone. A system audio interruption finalizes the current note. Force-quitting during recording can leave an incomplete audio file; Sotto flags it on relaunch. Recordings stop after 30 minutes.
+Choose **Settings → Action Button → Shortcut → Sotto → Record a voice note**. The App Shortcut opens Sotto and starts recording; running it again stops and saves. The audio background mode keeps an active recording running when you leave the app or lock your phone. A system audio interruption finalizes the current note. Force-quitting during recording can leave an incomplete audio file; Sotto flags it on relaunch. Recordings stop after **3 hours** by default. **Settings → Recording limit** lets you choose 1–1,440 minutes (up to 24 hours); changes apply to new recordings.
+
+Audio at or above 25 MB is split into sequential uploads below [Groq’s 25 MB attachment limit](https://console.groq.com/docs/speech-to-text), keeping the original recording intact. Chunks cover the audio consecutively and prefer pauses, using preceding-text context when no explicit prompt is supplied. Each part becomes a paragraph; uninterrupted speech can still be cut mid-word. See the [design and tradeoffs](../docs/long-recordings.md). The final transcript combines all parts; `.response.json` retains the per-part responses and offsets. [Account quotas](https://console.groq.com/docs/rate-limits) still apply: Groq’s published free-tier limits are two audio hours per hour and eight per day, so a 3-hour transcription can exhaust the hourly quota. A failed or cancelled transcription keeps the audio; selecting Transcribe restarts from the beginning and can bill earlier parts again.
 
 Starting from a locked physical iPhone and handling real calls/routes still require device testing. The shortcut opens the app; it does not promise recording from a locked phone without unlocking.
 
@@ -40,7 +42,7 @@ xcrun simctl list devices available
 scripts/test-ios.sh SIMULATOR_UDID
 ```
 
-Use a disposable, booted simulator with microphone input, internet access, and no Groq key. The script authorizes its microphone permission and seeds a small completed-note fixture. The editor test checks saved-note persistence independently of recording. The rejected-key check contacts Groq with an intentionally invalid test key and verifies it is not saved. The recording test records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
+Use a disposable, booted simulator with microphone input and no Groq key. The script authorizes its microphone permission and seeds a small completed-note fixture. The editor test checks saved-note persistence independently of recording. The rejected-key UI check uses a Debug-simulator-only fixture to verify the displayed error and confirm after relaunch that the key was not saved; it does not contact Groq. Core tests separately verify real HTTP response handling, including 401, 403, 429, and service errors. Release and physical-device builds exclude the fixture. The recording test records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
 
 ## Architecture
 

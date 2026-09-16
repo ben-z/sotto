@@ -13,7 +13,7 @@ permissions:
   contents: read
 jobs:
   test:
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     strategy:
@@ -30,6 +30,14 @@ jobs:
         run: test -d "$DEVELOPER_DIR" && xcodebuild -version
       - name: Core tests
         run: swift test
+      - name: Long recording tests
+        run: |
+          swiftc -swift-version 6 -parse-as-library Sources/SottoCore/*.swift scripts/test-long-recordings.swift -o .build/test-long-recordings
+          .build/test-long-recordings
+      - name: Recording deadline tests
+        run: |
+          swiftc -swift-version 6 -parse-as-library Sources/SottoCore/Configuration.swift Sources/SottoCore/Archive.swift Sources/SottoCore/Session.swift scripts/test-session.swift -o .build/test-session
+          .build/test-session
       - name: Benchmark accounting and prerequisite tests
         run: python3 scripts/test-benchmark.py
       - name: Diagnostic log tests
@@ -55,6 +63,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: resource-usage-${{ matrix.runner }}
+          retention-days: 90
           path: |
             work/ci-performance/report.md
             work/ci-performance/report.json

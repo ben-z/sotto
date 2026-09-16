@@ -7,10 +7,16 @@ import subprocess
 import signal
 import unittest
 import time
+import tempfile
+import json
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('benchmark', Path(__file__).with_name('benchmark-memory.py'))
 benchmark = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(benchmark)
+ci_spec = importlib.util.spec_from_file_location('ci_benchmark', Path(__file__).with_name('benchmark-ci.py'))
+ci = importlib.util.module_from_spec(ci_spec)
+ci_spec.loader.exec_module(ci)
 
 
 def fixture():
@@ -59,6 +65,45 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(len(benchmark.check_limits(summary, 128, 59, 32)), 2)
         summary['idle_after']['footprint_median_mib'] = 90
         self.assertIn('idle growth', benchmark.check_limits(summary, 128, 192, 32)[0])
+
+    def test_ci_budgets_reject_memory_and_bundle_regressions(self):
+        limits = ci.load_budgets()
+        summary = {phase: dict(footprint_peak_mib=12, footprint_median_mib=10) for phase in ci.PHASES}
+        self.assertEqual(ci.check_budgets(summary, 1_000_000, limits), [])
+        for phase in ci.PHASES:
+            threshold = limits['idle_peak_mib'] if phase.startswith('idle') else limits['active_peak_mib']
+            summary[phase]['footprint_peak_mib'] = threshold + 1
+            self.assertTrue(ci.check_budgets(summary, 1_000_000, limits), phase)
+            summary[phase]['footprint_peak_mib'] = 12
+        summary['idle_after']['footprint_median_mib'] = 11 + limits['idle_growth_mib']
+        self.assertTrue(ci.check_budgets(summary, 1_000_000, limits))
+        summary['idle_after']['footprint_median_mib'] = 10
+        self.assertTrue(ci.check_budgets(summary, (limits['bundle_mib'] + 1) * benchmark.MIB, limits))
+
+    def test_missing_chunked_phase_is_failure(self):
+        with self.assertRaisesRegex(RuntimeError, 'chunked_upload'):
+            ci.memory.summarize([dict(row, phase='chunked_upload') for row in fixture()][:1], ('chunked_upload',))
+
+    def test_incomplete_workload_retains_failure_report(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {}, clear=True):
+            output = Path(root)
+            ci.write_failure(output, RuntimeError('Benchmark host timed out'))
+            report = json.loads((output / 'report.json').read_text())
+            self.assertTrue(report['incomplete'])
+            self.assertEqual(report['failures'], ['Benchmark host timed out'])
+            self.assertIn('not a baseline', (output / 'report.md').read_text())
+
+    def test_dense_response_fixture_covers_contiguous_recording(self):
+        self.assertEqual(len(ci.RESPONSE_CASES), 20)
+        self.assertEqual(ci.EXPECTED_UPLOADS, 80)
+        first = json.loads(ci.response_payload(600, 0))
+        second = json.loads(ci.response_payload(600, 600))
+        tail = json.loads(ci.response_payload(600, 10200))
+        self.assertEqual(len(first['words']), 3600)
+        self.assertEqual(first['words'][-1]['word'], 'word3599')
+        self.assertEqual(second['words'][0]['word'], 'word3600')
+        self.assertEqual(tail['words'][-1]['word'], 'word64799')
+        self.assertEqual(first['text'].strip(), ' '.join(w['word'] for w in first['words']))
 
     def test_invalid_numbers_fail(self):
         for value in ('0', '-1', 'nan', 'inf'):
