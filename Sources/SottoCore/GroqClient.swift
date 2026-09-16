@@ -96,13 +96,13 @@ public struct GroqClient: Sendable {
         defer { try? FileManager.default.removeItem(at: directory) }
         let chunk = directory.appendingPathComponent("chunk.wav")
         let reader = try AudioChunks(file: file)
-        var texts: [String] = []
+        var text = ""
         var responses: [[String: Any]] = []
         while let range = try reader.next(to: chunk) {
             do {
                 let result = try await upload(chunk)
                 let transcript = try JSONDecoder().decode(ChunkTranscript.self, from: result.rawResponse)
-                texts.append(try transcript.retaining(range.retainedSeconds))
+                text += try transcript.retaining(range.retainedSeconds, following: text.last)
                 var response: [String: Any] = ["start_seconds": range.startSeconds, "duration_seconds": range.durationSeconds,
                     "response": try JSONSerialization.jsonObject(with: result.rawResponse)]
                 if let requestID = result.requestID { response["request_id"] = requestID }
@@ -113,7 +113,6 @@ public struct GroqClient: Sendable {
             }
             try FileManager.default.removeItem(at: chunk)
         }
-        let text = texts.joined()
         // Preserve each unmodified API response and its offset in a Sotto envelope.
         let raw = try JSONSerialization.data(withJSONObject: ["text": text, "chunks": responses], options: [.sortedKeys])
         return (text, raw, nil)

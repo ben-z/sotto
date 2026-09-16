@@ -11,7 +11,7 @@ struct ChunkTranscript: Decodable {
     let text: String
     let words: [Word]?
 
-    func retaining(_ seconds: Range<Double>) throws -> String {
+    func retaining(_ seconds: Range<Double>, following previous: Character? = nil) throws -> String {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return text }
         guard let words, !words.isEmpty else {
             throw SottoError("Groq omitted word timestamps needed to reconcile overlapping audio.")
@@ -28,7 +28,18 @@ struct ChunkTranscript: Decodable {
             guard !token.isEmpty, let match = text.range(of: token, range: cursor..<text.endIndex) else {
                 throw SottoError("Groq word timestamps could not be matched to the transcript.")
             }
-            if index == first && first > 0 { lower = match.lowerBound }
+            if index == first && first > 0 {
+                lower = match.lowerBound
+                // Keep the separator before the first owned word when the earlier
+                // response supplied none. Unspaced scripts have no gap to restore.
+                if let previous, !previous.isWhitespace {
+                    while lower > cursor {
+                        let before = text.index(before: lower)
+                        guard text[before].isWhitespace else { break }
+                        lower = before
+                    }
+                }
+            }
             if index == last + 1 { upper = match.lowerBound; break }
             cursor = match.upperBound
         }

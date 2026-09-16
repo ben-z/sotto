@@ -225,6 +225,29 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
             try expect(envelope["text"] as? String == expected, "Saved transcript differs from joined text")
         }
 
+        // Part one can omit the trailing overlap word entirely. Part two must
+        // retain its own separator after dropping leading context, without guessing
+        // from the language or duplicating whitespace already supplied by part one.
+        for (first, context, separator, owned, expected) in [
+            ("Hello", "hello", " ", "world", "Hello world"),
+            ("Hello ", "hello", " ", "world", "Hello world"),
+            ("Hello", "hello", "\n", "world", "Hello\nworld"),
+            ("你好", "你好", "", "世界", "你好世界")
+        ] {
+            let payloads: [[String: Any]] = [
+                ["text": first, "words": [["word": first.trimmingCharacters(in: .whitespacesAndNewlines), "start": 597, "end": 598]]],
+                ["text": context + separator + owned, "words": [
+                    ["word": context, "start": 0, "end": 0.5],
+                    ["word": owned, "start": 1.5, "end": 2]
+                ]]
+            ]
+            UploadFixture.reset(payloads: try payloads.map {
+                String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self)
+            })
+            let joined = try await transcribe(source)
+            try expect(UploadFixture.count == 2 && joined.text == expected, "Asymmetric overlap lost or duplicated boundary whitespace")
+        }
+
         UploadFixture.reset()
         let short = try await transcribe(compressed, trimWhitespace: false)
         try expect(UploadFixture.count == 1 && short.text == " Part 1. ", "Single upload behavior changed")
