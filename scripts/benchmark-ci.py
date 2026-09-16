@@ -23,11 +23,11 @@ spec.loader.exec_module(memory)
 PHASES = ('warmup', 'idle_before', 'short_upload', 'long_upload', 'chunked_upload', 'idle_after')
 BUDGET_FILE = ROOT / 'scripts/ci-memory/budgets.json'
 FIXTURES = {'short': 60, 'long': 600, 'chunked': 10800}
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 WORDS_PER_SECOND = 6
 WORKLOAD_TIMEOUT_SECONDS = 900
 RESPONSE_CASES = [('short', 60, 0), ('long', 600, 0)] + [
-    ('chunked', min(600, 10800 - start), start) for start in range(0, 10800, 598)
+    ('chunked', min(600, 10800 - start), start) for start in range(0, 10800, 600)
 ]
 EXPECTED_UPLOADS = 4 * len(RESPONSE_CASES)  # Warm-up plus three cycles.
 
@@ -83,6 +83,15 @@ class FixtureServer(http.server.BaseHTTPRequestHandler):
                 time.sleep(0.002)  # Fixed receiver pacing, not real network latency.
             if b'whisper-large-v3-turbo' not in prefix or b'RIFF' not in prefix:
                 raise ValueError('Missing production multipart fields or WAV header')
+            prompt_header = b'name="prompt"\r\n\r\n'
+            if index > 2:  # Preceding text only after the first chunk.
+                previous = json.loads(self.server.responses[index - 1])['text'].strip().encode()[-224:]
+                if prompt_header + previous + b'\r\n' not in prefix:
+                    raise ValueError('Missing or incorrect preceding-text context')
+            elif prompt_header in prefix:
+                raise ValueError('Unexpected preceding-text context on first upload')
+            if b'timestamp_granularities' in prefix:
+                raise ValueError('Word timestamps should not be requested')
             time.sleep(0.25)
             body = self.server.responses[index]
             self.send_response(200)
@@ -214,7 +223,7 @@ def run(output):
     for phase, row in summary.items():
         lines.append(f"| {phase} | {row['footprint_median_mib']:.1f} / {row['footprint_peak_mib']:.1f} | {row['rss_peak_mib']:.1f} | {row['cpu_percent']:.2f} |")
     lines += ['', f'Packaged native app: {bundle_bytes:,} file bytes.',
-              'Protocol v3: six timestamped words per second (64,800 unique words per three-hour recording); one warm-up of all workloads, then three cycles each of 60-second, 600-second, and three-hour deterministic PCM WAV fixtures. The three-hour recording uses 19 overlapping uploads, exercising decoding, boundary reconciliation, multipart construction, and archive completion. All 84 uploads must complete.',
+              'Protocol v4: six timestamped words per second (64,800 unique words per three-hour recording); one warm-up of all workloads, then three cycles each of 60-second, 600-second, and three-hour deterministic PCM WAV fixtures. The three-hour recording uses 18 contiguous uploads, exercising decoding, pause scanning, preceding-text context, multipart construction, and archive completion. All 80 uploads must complete.',
               'Five-second idle windows before/after; 20 ms sampling. Fixture server: 2 ms per 64 KiB read + 250 ms response delay. Server/sampler excluded. No microphone, Keychain, clipboard, UI, Groq service, or real transcription inference.',
               f"Checked-in budgets: idle {limits['idle_peak_mib']} MiB; active {limits['active_peak_mib']} MiB; retained idle growth {limits['idle_growth_mib']} MiB; packaged app {limits['bundle_mib']} MiB. Memory and size fail CI; CPU is reported, not gated on noisy shared runners.",
               '**' + ('FAIL: ' + '; '.join(failures) if failures else 'PASS') + '**', '']

@@ -15,7 +15,10 @@ struct MemoryWorkload {
         let result = try await client.transcribe(file: archive.audioURL(record), key: "benchmark-fixture-key",
             model: record.model, language: record.language, prompt: "")
         let seconds = name == "chunked" ? 10800 : name == "long" ? 600 : 60
-        let expected = (0..<(seconds * 6)).map { "word\($0)" }.joined(separator: " ")
+        let words = (0..<(seconds * 6)).map { "word\($0)" }
+        let expected = name == "chunked"
+            ? stride(from: 0, to: words.count, by: 3600).map { words[$0..<min($0 + 3600, words.count)].joined(separator: " ") }.joined(separator: "\n\n")
+            : words.joined(separator: " ")
         guard result.text == expected else { throw SottoError("Unexpected fixture response or missing upload parts") }
         try archive.complete(&record, with: result)
         guard record.status == "complete" else { throw SottoError("Archive did not complete") }

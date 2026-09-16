@@ -72,7 +72,8 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         let source = root.appendingPathComponent("source.wav")
         try writeAudio(to: source, seconds: 783) // Exceeds the 25 MB attachment limit.
         let compressed = try verifyChunking(source: source, directory: root)
-        try verifyMergeContract()
+        try verifyPauses(directory: root)
+        try verifyContextPrompt()
         try await verifyDirectImports(directory: root)
         try await verifyUploads(source: source, compressed: compressed)
         print("Long recording checks passed: frame continuity, byte limits, sequential uploads, metadata, quota failure, cancellation, and cleanup.")
@@ -80,7 +81,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
 
     static func verifyChunking(source: URL, directory: URL) throws -> URL {
         // Verify decoded content across every boundary, byte bounds, and final tail.
-        let chunks = try AudioChunks(file: source, maximumBytes: 100_096, maximumSeconds: 10, overlapSeconds: 0)
+        let chunks = try AudioChunks(file: source, maximumBytes: 100_096, maximumSeconds: 10)
         let part = directory.appendingPathComponent("part.wav")
         var frames: AVAudioFramePosition = 0
         while let range = try chunks.next(to: part) {
@@ -110,7 +111,7 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
             try input.read(into: buffer)
             try output.write(from: buffer)
         }
-        let compressedChunks = try AudioChunks(file: compressed, maximumSeconds: 2, overlapSeconds: 0)
+        let compressedChunks = try AudioChunks(file: compressed, maximumSeconds: 2)
         var decodedFrames: AVAudioFramePosition = 0
         while let _ = try compressedChunks.next(to: part) {
             decodedFrames += try AVAudioFile(forReading: part).length
@@ -123,73 +124,68 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         try expect(try largeLimit.next(to: part) != nil, "Large duration limit rejected valid audio")
         try expect(try AVAudioFile(forReading: part).length == decodedFrames, "Large duration limit lost audio")
         try FileManager.default.removeItem(at: part)
-        let overlapping = try AudioChunks(file: compressed, maximumSeconds: 2)
-        var retainedEnd = 0.0
-        var count = 0
-        while let range = try overlapping.next(to: part) {
-            let start = range.startSeconds + range.retainedSeconds.lowerBound
-            try expect(abs(start - retainedEnd) < 0.00001, "Overlapping chunks have a retained gap or duplicate")
-            if count > 0 { try expect(range.retainedSeconds.lowerBound > 0, "Missing leading audio context") }
-            retainedEnd = range.startSeconds + range.retainedSeconds.upperBound
-            count += 1
-            try FileManager.default.removeItem(at: part)
-        }
-        try expect(count > 1 && abs(retainedEnd - Double(decodedFrames) / 16000) < 0.00001, "Overlap lost the AAC tail")
         return compressed
     }
 
-    static func verifyMergeContract() throws {
-        let left = AudioChunks.Segment(startSeconds: 0, durationSeconds: 600, retainedSeconds: 0..<599)
-        let right = AudioChunks.Segment(startSeconds: 598, durationSeconds: 185, retainedSeconds: 1..<185)
-        let times = [598.2, 598.6, 599.0, 599.4, 599.8]
-        // Every combination of recognized/missing words on both sides, with
-        // independent timestamp drift. Shared words survive once; unmatched words
-        // survive exactly when their response owns them, in source order.
-        for leftMask in 0..<32 {
-            for rightMask in 0..<32 {
-                for drift in [-0.1, 0.0, 0.1] {
-                    func transcript(mask: Int, offset: Double, drift: Double) -> ChunkTranscript {
-                        let words = times.indices.filter { mask & (1 << $0) != 0 }.map { index in
-                            let midpoint = times[index] - offset + drift
-                            return ChunkTranscript.Word(word: "word\(index)", start: midpoint - 0.03, end: midpoint + 0.03)
-                        }
-                        return ChunkTranscript(text: words.map { $0.word + " " }.joined(), words: words)
+    static func verifyPauses(directory: URL) throws {
+        let source = directory.appendingPathComponent("pauses.wav")
+        let part = directory.appendingPathComponent("pause-part.wav")
+        let rate = 16000
+        let format = AVAudioFormat(standardFormatWithSampleRate: Double(rate), channels: 2)!
+        // Latest pause, too-short pause, silence through the limit, and speech on
+        // just one channel. Compare every sample, including all subsequent chunks.
+        for (pauses, noisyChannel, expectedEnd) in [
+            ([1.6..<2.0, 2.4..<2.8], false, 2.6),
+            ([2.4..<2.5], false, 3.0),
+            ([0.0..<8.0], false, 3.0),
+            ([2.4..<2.8], true, 3.0)
+        ] {
+            func sample(_ frame: Int, _ channel: Int) -> Float {
+                let quiet = pauses.contains { $0.contains(Double(frame) / Double(rate)) }
+                return quiet && !(noisyChannel && channel == 1) ? 0 : Float((frame + channel) % 100 + 1) / 256
+            }
+            do {
+                let file = try AVAudioFile(forWriting: source, settings: [
+                    AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: rate,
+                    AVNumberOfChannelsKey: 2, AVLinearPCMBitDepthKey: 16,
+                    AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
+                ])
+                let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate))!
+                buffer.frameLength = buffer.frameCapacity
+                for second in 0..<8 {
+                    for channel in 0..<2 {
+                        for frame in 0..<rate { buffer.floatChannelData![channel][frame] = sample(second * rate + frame, channel) }
                     }
-                    var merger = ChunkTranscriptMerger()
-                    try merger.append(transcript(mask: leftMask, offset: 0, drift: drift), segment: left)
-                    try merger.append(transcript(mask: rightMask, offset: 598, drift: -drift), segment: right)
-                    let expected = times.indices.filter { index in
-                        let inLeft = leftMask & (1 << index) != 0, inRight = rightMask & (1 << index) != 0
-                        return (inLeft && inRight) || (inLeft && times[index] + drift < 599)
-                            || (inRight && times[index] - drift >= 599)
-                    }.map { "word\($0)" }
-                    let actual = try merger.finish().split(whereSeparator: \.isWhitespace).map(String.init)
-                    try expect(actual == expected, "Overlap contract failed for masks \(leftMask)/\(rightMask), drift \(drift)")
+                    try file.write(from: buffer)
                 }
             }
-        }
-        // The same whitespace rule must hold for a whole response, a prefix,
-        // and a slice whose preceding context was removed.
-        for first in [0, 1] {
-            for prefix in ["", " ", "\t", "\n"] {
-                for previous: Character? in [nil, "x", " ", "\n"] {
-                    let words: [ChunkTranscript.Word] = (first == 0 ? [] : [.init(word: "context", start: 0, end: 0.5)])
-                        + [.init(word: "word", start: 1, end: 2), .init(word: "tail", start: 2, end: 3)]
-                    let source = ChunkTranscript(text: (first == 0 ? "" : "context") + prefix + "word tail", words: words)
-                    for end in [first + 1, words.count] {
-                        let gap = previous?.isWhitespace == true || (first > 0 && previous == nil) ? "" : prefix
-                        let expected = gap + (end == words.count ? "word tail" : "word ")
-                        try expect(try source.slice(first..<end, following: previous) == expected, "Boundary whitespace depends on slice position")
+            let chunks = try AudioChunks(file: source, maximumSeconds: 3)
+            var frames = 0
+            while let segment = try chunks.next(to: part) {
+                try expect(abs(segment.startSeconds - Double(frames) / Double(rate)) < 0.00001, "Pause splitting created a gap")
+                if frames == 0 { try expect(abs(segment.durationSeconds - expectedEnd) < 0.011, "Wrong pause boundary") }
+                let audio = try AVAudioFile(forReading: part)
+                let buffer = AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: AVAudioFrameCount(audio.length))!
+                try audio.read(into: buffer)
+                try expect(buffer.frameLength > 0 && audio.length <= 3 * rate, "Pause splitting did not progress within the limit")
+                for channel in 0..<2 {
+                    for frame in 0..<Int(buffer.frameLength) {
+                        try expect(buffer.floatChannelData![channel][frame] == sample(frames + frame, channel), "Pause splitting altered audio")
                     }
                 }
+                frames += Int(buffer.frameLength)
+                try FileManager.default.removeItem(at: part)
             }
+            try expect(frames == 8 * rate, "Pause splitting lost final frames")
         }
-        var missingMetadata = ChunkTranscriptMerger()
-        do {
-            try missingMetadata.append(ChunkTranscript(text: "Missing metadata", words: nil), segment: left)
-            throw SottoError("Accepted missing timestamps")
-        } catch {
-            try expect(error.localizedDescription.contains("Groq omitted word timestamps"), "Missing timestamps did not fail clearly")
+    }
+
+    static func verifyContextPrompt() throws {
+        for text in ["", "CUDA", String(repeating: "context ", count: 200),
+                     String(repeating: "你好 👨‍👩‍👧‍👦 é ", count: 100)] {
+            let prompt = GroqClient.contextPrompt(text)
+            try expect(prompt.utf8.count <= 224 && text.hasSuffix(prompt), "Context exceeded token bound or changed Unicode")
+            if text.utf8.count <= 224 { try expect(prompt == text, "Short context changed") }
         }
     }
 
@@ -221,148 +217,38 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
         UploadFixture.reset()
         let result = try await transcribe(source)
         try expect(UploadFixture.count == 2, "Expected two uploads")
-        try expect(result.text == "Part 1. Part 2.", "Transcript order or trimming changed")
+        try expect(result.text == "Part 1.\n\nPart 2.", "Transcript order or trimming changed")
         let raw = try JSONSerialization.jsonObject(with: result.rawResponse) as! [String: Any]
         let responses = raw["chunks"] as! [[String: Any]]
-        try expect(responses.count == 2 && responses[1]["start_seconds"] as? Double == 598, "Missing chunk offsets")
-        try expect(responses[1]["duration_seconds"] as? Double == 185, "Missing final chunk")
+        try expect(responses.count == 2 && responses[1]["start_seconds"] as? Double == 600, "Missing chunk offsets")
+        try expect(responses[1]["duration_seconds"] as? Double == 183, "Missing final chunk")
         try expect(responses[0]["request_id"] as? String == "part-1", "Missing request IDs")
         try expect((responses[0]["response"] as? [String: Any])?["text"] as? String == " Part 1. ", "Raw response changed")
         try expect(try temporaryUploads() == uploadsBefore, "Temporary uploads leaked on success")
 
-        // Exercise reconciliation and joining through the actual upload path.
-        // The overlapping word belongs to part two; only the API's spacing survives.
+        // Full responses are paragraphs, without word metadata or word guessing.
         for (first, second, expected) in [
-            ("Hello, splitword", "splitword again again.", "Hello, splitword again again."),
-            ("Hello,\nsplitword", "splitword again again.", "Hello,\nsplitword again again."),
-            ("你好世界", "世界再见", "你好世界再见")
+            ("Hello, splitword", "splitword again again.", "Hello, splitword\n\nsplitword again again."),
+            ("Hello,\nworld", "Next.", "Hello,\nworld\n\nNext."),
+            ("你好世界", "世界再见", "你好世界\n\n世界再见"),
+            (" \n", "Next.", "Next."), ("First.", "", "First."), ("", " ", "")
         ] {
-            let chinese = first.hasPrefix("你好")
-            let payloads: [[String: Any]] = [
-                ["text": first, "words": [
-                    ["word": chinese ? "你好" : "Hello,", "start": 597, "end": 598],
-                    ["word": chinese ? "世界" : "splitword", "start": 598.7, "end": 599.5]
-                ]],
-                ["text": second, "words": [
-                    ["word": chinese ? "世界" : "splitword", "start": 0.7, "end": 1.5],
-                    ["word": chinese ? "再见" : "again", "start": 2, "end": 2.5]
-                ]]
-            ]
-            UploadFixture.reset(payloads: try payloads.map {
-                String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self)
-            })
-            let joined = try await transcribe(source)
-            try expect(UploadFixture.count == 2 && joined.text == expected, "Chunk joining changed boundary whitespace")
-            let envelope = try JSONSerialization.jsonObject(with: joined.rawResponse) as! [String: Any]
-            try expect(envelope["text"] as? String == expected, "Saved transcript differs from joined text")
-        }
-
-        // Part one can omit the trailing overlap word entirely. Part two must
-        // retain its own separator after dropping leading context, without guessing
-        // from the language or duplicating whitespace already supplied by part one.
-        for (first, context, separator, owned, expected) in [
-            ("Hello", "hello", " ", "world", "Hello world"),
-            ("Hello ", "hello", " ", "world", "Hello world"),
-            ("Hello", "hello", "\n", "world", "Hello\nworld"),
-            ("你好", "你好", "", "世界", "你好世界")
-        ] {
-            let payloads: [[String: Any]] = [
-                ["text": first, "words": [["word": first.trimmingCharacters(in: .whitespacesAndNewlines), "start": 597, "end": 598]]],
-                ["text": context + separator + owned, "words": [
-                    ["word": context, "start": 0, "end": 0.5],
-                    ["word": owned, "start": 1.5, "end": 2]
-                ]]
-            ]
-            UploadFixture.reset(payloads: try payloads.map {
-                String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self)
-            })
-            let joined = try await transcribe(source)
-            try expect(UploadFixture.count == 2 && joined.text == expected, "Asymmetric overlap lost or duplicated boundary whitespace")
-        }
-
-        // No alignable context and an already-owned first word: both responses
-        // can supply whitespace, but the join must retain only one separator.
-        for (first, second, expected) in [
-            ("Hello ", " world", "Hello world"),
-            ("Hello\n", " world", "Hello\nworld"),
-            ("Hello", "\nworld", "Hello\nworld"),
-            ("你好", "世界", "你好世界")
-        ] {
-            let payloads = try [(first, 597.5), (second, 1.5)].map { text, midpoint in
-                let payload: [String: Any] = ["text": text, "words": [[
-                    "word": text.trimmingCharacters(in: .whitespacesAndNewlines),
-                    "start": midpoint - 0.1, "end": midpoint + 0.1
-                ]]]
-                return String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
-            }
-            UploadFixture.reset(payloads: payloads)
-            let joined = try await transcribe(source)
-            try expect(joined.text == expected, "First-word slice duplicated or lost boundary whitespace")
-        }
-
-        // Independent responses can place the same word on opposite sides of
-        // the nominal seam. Shared words must still appear exactly once.
-        for (leftTime, rightTime) in [(598.9, 1.1), (599.1, 0.9)] {
-            let payloads: [[String: Any]] = [
-                ["text": "Hello boundary", "words": [
-                    ["word": "Hello", "start": 597, "end": 598],
-                    ["word": "boundary", "start": leftTime - 0.1, "end": leftTime + 0.1]
-                ], "extra": ["unmodified": [1, 2, 3]]],
-                ["text": "boundary world", "words": [
-                    ["word": "boundary", "start": rightTime - 0.1, "end": rightTime + 0.1],
-                    ["word": "world", "start": 2, "end": 3]
-                ]]
-            ]
+            let payloads: [[String: Any]] = [["text": first, "extra": ["unmodified": [1, 2, 3]]], ["text": second]]
             let encoded = try payloads.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }
             UploadFixture.reset(payloads: encoded)
             let joined = try await transcribe(source)
-            try expect(joined.text == "Hello boundary world", "Timestamp drift duplicated or dropped speech")
+            try expect(UploadFixture.count == 2 && joined.text == expected, "Paragraph content changed")
             let envelope = try JSONSerialization.jsonObject(with: joined.rawResponse) as! [String: Any]
+            try expect(envelope["text"] as? String == expected, "Saved transcript differs from returned text")
             let parts = envelope["chunks"] as! [[String: Any]]
-            try expect((parts[0]["response"] as? NSDictionary) == (payloads[0] as NSDictionary), "Spooling changed raw response fields")
-            // Read the mapped envelope after transcribeChunks removed its backing path.
-            try expect(String(decoding: joined.rawResponse, as: UTF8.self).contains(encoded[0]), "Spooling rewrote response bytes")
+            try expect((parts[0]["response"] as? NSDictionary) == (payloads[0] as NSDictionary), "Spooling changed raw fields")
+            // Access after the temporary response file has been unlinked.
+            try expect(String(decoding: joined.rawResponse, as: UTF8.self).contains(encoded[0]), "Spooling changed raw bytes")
             try expect(try temporaryUploads() == uploadsBefore, "Response spool leaked")
         }
-
-        let repeated: [[String: Any]] = [
-            ["text": "Hello go go", "words": [
-                ["word": "Hello", "start": 597, "end": 598],
-                ["word": "go", "start": 598.4, "end": 598.8],
-                ["word": "go", "start": 599.1, "end": 599.5]
-            ]],
-            ["text": "go go world", "words": [
-                ["word": "go", "start": 0.5, "end": 0.9],
-                ["word": "go", "start": 1.0, "end": 1.4],
-                ["word": "world", "start": 2, "end": 3]
-            ]]
-        ]
-        UploadFixture.reset(payloads: try repeated.map {
-            String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self)
-        })
-        let repeatedResult = try await transcribe(source)
-        try expect(repeatedResult.text == "Hello go go world", "Alignment removed a legitimate repeated word")
-
-        // Matching an overlap anchor must not erase a different owned word
-        // before or after it in either response.
-        for (firstText, firstWords, secondText, secondWords, expected) in [
-            ("alpha beta", [("alpha", 598.4), ("beta", 598.8)],
-             "alpha gamma", [("alpha", 0.4), ("gamma", 1.4)], "alpha beta gamma"),
-            ("alpha gamma", [("alpha", 599.2), ("gamma", 599.7)],
-             "beta alpha gamma", [("beta", 1.05), ("alpha", 1.2), ("gamma", 1.7)], "beta alpha gamma"),
-            ("alpha beta shared", [("alpha", 598.2), ("beta", 598.7), ("shared", 599.4)],
-             "alpha gamma shared", [("alpha", 0.2), ("gamma", 1.1), ("shared", 1.4)], "alpha beta gamma shared")
-        ] {
-            let payloads = try [(firstText, firstWords), (secondText, secondWords)].map { text, words in
-                let payload: [String: Any] = ["text": text, "words": words.map { word, midpoint in
-                    ["word": word, "start": midpoint - 0.04, "end": midpoint + 0.04] as [String: Any]
-                }]
-                return String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
-            }
-            UploadFixture.reset(payloads: payloads)
-            let joined = try await transcribe(source)
-            try expect(joined.text == expected, "Alignment dropped an unmatched owned word: \(joined.text)")
-        }
+        UploadFixture.reset()
+        let untrimmed = try await transcribe(source, trimWhitespace: false)
+        try expect(untrimmed.text == " Part 1. \n\n Part 2. ", "Disabled whitespace trimming changed paragraph content")
 
         UploadFixture.reset()
         let short = try await transcribe(compressed, trimWhitespace: false)

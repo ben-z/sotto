@@ -68,20 +68,20 @@ public struct GroqClient: Sendable {
         if let language { fields.append(("language", language)) }
         if !prompt.isEmpty { fields.append(("prompt", prompt)) }
         let needsChunks = size >= Self.maximumAttachmentBytes
-        if needsChunks { fields.append(("timestamp_granularities[]", "word")) }
 
-        // All parts share one session. Final timing and whitespace handling apply
-        // to the complete transcription, regardless of how many uploads it takes.
+        // All parts share one session; timing covers the complete transcription.
         let session = URLSession(configuration: uploadConfiguration)
         defer { session.invalidateAndCancel() }
         let start = ContinuousClock.now
-        let upload = { (audio: URL) in
-            try await transcribeUpload(file: audio, key: key, fields: fields, session: session)
+        let upload = { (audio: URL, context: String) in
+            var requestFields = fields
+            if prompt.isEmpty && !context.isEmpty { requestFields.append(("prompt", context)) }
+            return try await transcribeUpload(file: audio, key: key, fields: requestFields, session: session)
         }
         let response = if needsChunks {
-            try await transcribeChunks(file: file, upload: upload)
+            try await transcribeChunks(file: file, trimWhitespace: trimWhitespace, upload: upload)
         } else {
-            try await upload(file)
+            try await upload(file, "")
         }
         try Task.checkCancellation()
         let elapsed = start.duration(to: .now).components
@@ -90,13 +90,14 @@ public struct GroqClient: Sendable {
                                    requestID: response.requestID).trimmingWhitespace(trimWhitespace)
     }
 
-    private func transcribeChunks(file: URL, upload: (URL) async throws -> Response) async throws -> Response {
+    private func transcribeChunks(file: URL, trimWhitespace: Bool, upload: (URL, String) async throws -> Response) async throws -> Response {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Sotto-chunks-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }
         let chunk = directory.appendingPathComponent("chunk.wav")
         let reader = try AudioChunks(file: file)
-        var merger = ChunkTranscriptMerger()
+        var text = ""
+        var context = ""
         var completed = 0
         let responseFile = directory.appendingPathComponent("response.json")
         guard FileManager.default.createFile(atPath: responseFile.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
@@ -107,10 +108,15 @@ public struct GroqClient: Sendable {
         try output.write(contentsOf: Data("{\"chunks\":[".utf8))
         while let range = try reader.next(to: chunk) {
             do {
-                let result = try await upload(chunk)
+                let result = try await upload(chunk, context)
+                let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let paragraph = trimWhitespace ? trimmed : result.text
+                if !trimmed.isEmpty {
+                    if !text.isEmpty { text += "\n\n" }
+                    text += paragraph
+                }
+                context = Self.contextPrompt(trimmed)
                 try autoreleasepool {
-                    let transcript = try JSONDecoder().decode(ChunkTranscript.self, from: result.rawResponse)
-                    try merger.append(transcript, segment: range)
                     var metadata: [String: Any] = ["start_seconds": range.startSeconds, "duration_seconds": range.durationSeconds]
                     if let requestID = result.requestID { metadata["request_id"] = requestID }
                     if completed > 0 { try output.write(contentsOf: Data(",".utf8)) }
@@ -127,7 +133,6 @@ public struct GroqClient: Sendable {
             }
             try FileManager.default.removeItem(at: chunk)
         }
-        let text = try merger.finish()
         try output.write(contentsOf: Data("],\"text\":".utf8))
         try output.write(contentsOf: JSONEncoder().encode(text))
         try output.write(contentsOf: Data("}".utf8))
@@ -136,6 +141,17 @@ public struct GroqClient: Sendable {
         // the complete envelope or retaining every decoded word dictionary in RAM.
         let raw = try Data(contentsOf: responseFile, options: .alwaysMapped)
         return (text, raw, nil)
+    }
+
+    /// Whisper accepts at most 224 prompt tokens. A 224-byte UTF-8 suffix is a
+    /// conservative bound for its byte-level tokenizer, preserving whole characters.
+    /// An explicit caller prompt takes precedence over automatic preceding context.
+    static func contextPrompt(_ text: String) -> String {
+        var bytes = 0
+        return String(text.reversed().prefix { character in
+            bytes += String(character).utf8.count
+            return bytes <= 224
+        }.reversed())
     }
 
     private func transcribeUpload(file: URL, key: String, fields: [(String, String)], session: URLSession) async throws -> Response {
