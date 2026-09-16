@@ -96,25 +96,45 @@ public struct GroqClient: Sendable {
         defer { try? FileManager.default.removeItem(at: directory) }
         let chunk = directory.appendingPathComponent("chunk.wav")
         let reader = try AudioChunks(file: file)
-        var text = ""
-        var responses: [[String: Any]] = []
+        var merger = ChunkTranscriptMerger()
+        var completed = 0
+        let responseFile = directory.appendingPathComponent("response.json")
+        guard FileManager.default.createFile(atPath: responseFile.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+            throw SottoError("Cannot create temporary transcription response.")
+        }
+        let output = try FileHandle(forWritingTo: responseFile)
+        defer { try? output.close() }
+        try output.write(contentsOf: Data("{\"chunks\":[".utf8))
         while let range = try reader.next(to: chunk) {
             do {
                 let result = try await upload(chunk)
-                let transcript = try JSONDecoder().decode(ChunkTranscript.self, from: result.rawResponse)
-                text += try transcript.retaining(range.retainedSeconds, following: text.last)
-                var response: [String: Any] = ["start_seconds": range.startSeconds, "duration_seconds": range.durationSeconds,
-                    "response": try JSONSerialization.jsonObject(with: result.rawResponse)]
-                if let requestID = result.requestID { response["request_id"] = requestID }
-                responses.append(response)
+                try autoreleasepool {
+                    let transcript = try JSONDecoder().decode(ChunkTranscript.self, from: result.rawResponse)
+                    try merger.append(transcript, segment: range)
+                    var metadata: [String: Any] = ["start_seconds": range.startSeconds, "duration_seconds": range.durationSeconds]
+                    if let requestID = result.requestID { metadata["request_id"] = requestID }
+                    if completed > 0 { try output.write(contentsOf: Data(",".utf8)) }
+                    let header = try JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys])
+                    try output.write(contentsOf: header.dropLast())
+                    try output.write(contentsOf: Data(",\"response\":".utf8))
+                    try output.write(contentsOf: result.rawResponse)
+                    try output.write(contentsOf: Data("}".utf8))
+                }
+                completed += 1
             } catch {
                 try Task.checkCancellation()
-                throw SottoError("Transcription stopped at part \(responses.count + 1): \(error.localizedDescription) Original audio is retained at \(file.path). Retrying starts from the beginning.")
+                throw SottoError("Transcription stopped at part \(completed + 1): \(error.localizedDescription) Original audio is retained at \(file.path). Retrying starts from the beginning.")
             }
             try FileManager.default.removeItem(at: chunk)
         }
-        // Preserve each unmodified API response and its offset in a Sotto envelope.
-        let raw = try JSONSerialization.data(withJSONObject: ["text": text, "chunks": responses], options: [.sortedKeys])
+        let text = try merger.finish()
+        try output.write(contentsOf: Data("],\"text\":".utf8))
+        try output.write(contentsOf: JSONEncoder().encode(text))
+        try output.write(contentsOf: Data("}".utf8))
+        try output.close()
+        // The mapping stays valid after unlinking the temporary file. Avoid loading
+        // the complete envelope or retaining every decoded word dictionary in RAM.
+        let raw = try Data(contentsOf: responseFile, options: .alwaysMapped)
         return (text, raw, nil)
     }
 
@@ -143,7 +163,7 @@ public struct GroqClient: Sendable {
             throw SottoError("Groq HTTP \(response.statusCode): \(detail)")
         }
         struct Payload: Decodable { let text: String }
-        let decoded = try JSONDecoder().decode(Payload.self, from: data)
+        let decoded = try autoreleasepool { try JSONDecoder().decode(Payload.self, from: data) }
         return (decoded.text, data, response.value(forHTTPHeaderField: "x-request-id"))
     }
 

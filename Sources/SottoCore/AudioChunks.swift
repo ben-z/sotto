@@ -7,7 +7,7 @@ final class AudioChunks {
     struct Segment {
         let startSeconds: Double
         let durationSeconds: Double
-        /// Local timestamps owned by this part, split at overlap midpoints.
+        /// Nominal local ownership, refined by matching adjacent transcript words.
         let retainedSeconds: Range<Double>
     }
     static let maximumUploadBytes = 24_000_000 // Headroom below Groq's 25 MB attachment limit.
@@ -40,7 +40,7 @@ final class AudioChunks {
         self.outputFormat = outputFormat
     }
 
-    /// Overlap preserves speech context; retained ranges cover the recording once.
+    /// Overlap preserves speech context; nominal ranges cover the recording once.
     func next(to destination: URL) throws -> Segment? {
         try Task.checkCancellation()
         let start = nextFrame

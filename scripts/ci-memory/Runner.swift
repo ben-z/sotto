@@ -14,9 +14,8 @@ struct MemoryWorkload {
         try FileManager.default.copyItem(at: directory.appendingPathComponent(name + ".wav"), to: archive.audioURL(record))
         let result = try await client.transcribe(file: archive.audioURL(record), key: "benchmark-fixture-key",
             model: record.model, language: record.language, prompt: "")
-        let parts = name == "chunked" ? 19 : 1
-        let expected = Array(repeating: " Sotto benchmark fixture. ", count: parts).joined()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let seconds = name == "chunked" ? 10800 : name == "long" ? 600 : 60
+        let expected = (0..<(seconds * 6)).map { "word\($0)" }.joined(separator: " ")
         guard result.text == expected else { throw SottoError("Unexpected fixture response or missing upload parts") }
         try archive.complete(&record, with: result)
         guard record.status == "complete" else { throw SottoError("Archive did not complete") }

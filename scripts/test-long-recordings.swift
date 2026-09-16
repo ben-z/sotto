@@ -248,6 +248,49 @@ private final class UploadFixture: URLProtocol, @unchecked Sendable {
             try expect(UploadFixture.count == 2 && joined.text == expected, "Asymmetric overlap lost or duplicated boundary whitespace")
         }
 
+        // Independent responses can place the same word on opposite sides of
+        // the nominal seam. Shared words must still appear exactly once.
+        for (leftTime, rightTime) in [(598.9, 1.1), (599.1, 0.9)] {
+            let payloads: [[String: Any]] = [
+                ["text": "Hello boundary", "words": [
+                    ["word": "Hello", "start": 597, "end": 598],
+                    ["word": "boundary", "start": leftTime - 0.1, "end": leftTime + 0.1]
+                ], "extra": ["unmodified": [1, 2, 3]]],
+                ["text": "boundary world", "words": [
+                    ["word": "boundary", "start": rightTime - 0.1, "end": rightTime + 0.1],
+                    ["word": "world", "start": 2, "end": 3]
+                ]]
+            ]
+            let encoded = try payloads.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }
+            UploadFixture.reset(payloads: encoded)
+            let joined = try await transcribe(source)
+            try expect(joined.text == "Hello boundary world", "Timestamp drift duplicated or dropped speech")
+            let envelope = try JSONSerialization.jsonObject(with: joined.rawResponse) as! [String: Any]
+            let parts = envelope["chunks"] as! [[String: Any]]
+            try expect((parts[0]["response"] as? NSDictionary) == (payloads[0] as NSDictionary), "Spooling changed raw response fields")
+            // Read the mapped envelope after transcribeChunks removed its backing path.
+            try expect(String(decoding: joined.rawResponse, as: UTF8.self).contains(encoded[0]), "Spooling rewrote response bytes")
+            try expect(try temporaryUploads() == uploadsBefore, "Response spool leaked")
+        }
+
+        let repeated: [[String: Any]] = [
+            ["text": "Hello go go", "words": [
+                ["word": "Hello", "start": 597, "end": 598],
+                ["word": "go", "start": 598.4, "end": 598.8],
+                ["word": "go", "start": 599.1, "end": 599.5]
+            ]],
+            ["text": "go go world", "words": [
+                ["word": "go", "start": 0.5, "end": 0.9],
+                ["word": "go", "start": 1.0, "end": 1.4],
+                ["word": "world", "start": 2, "end": 3]
+            ]]
+        ]
+        UploadFixture.reset(payloads: try repeated.map {
+            String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self)
+        })
+        let repeatedResult = try await transcribe(source)
+        try expect(repeatedResult.text == "Hello go go world", "Alignment removed a legitimate repeated word")
+
         UploadFixture.reset()
         let short = try await transcribe(compressed, trimWhitespace: false)
         try expect(UploadFixture.count == 1 && short.text == " Part 1. ", "Single upload behavior changed")

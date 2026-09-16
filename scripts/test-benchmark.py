@@ -93,6 +93,17 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(report['failures'], ['Benchmark host timed out'])
             self.assertIn('not a baseline', (output / 'report.md').read_text())
 
+    def test_dense_response_fixture_covers_overlap_and_tail(self):
+        self.assertEqual(len(ci.RESPONSE_CASES), 21)
+        self.assertEqual(ci.EXPECTED_UPLOADS, 84)
+        first = json.loads(ci.response_payload(600, 0))
+        second = json.loads(ci.response_payload(600, 598))
+        tail = json.loads(ci.response_payload(36, 10764))
+        self.assertEqual(len(first['words']), 3600)
+        self.assertEqual([w['word'] for w in first['words'][-12:]], [w['word'] for w in second['words'][:12]])
+        self.assertEqual(tail['words'][-1]['word'], 'word64799')
+        self.assertEqual(first['text'].strip(), ' '.join(w['word'] for w in first['words']))
+
     def test_invalid_numbers_fail(self):
         for value in ('0', '-1', 'nan', 'inf'):
             with self.assertRaises(benchmark.argparse.ArgumentTypeError):
