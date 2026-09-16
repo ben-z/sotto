@@ -50,6 +50,8 @@ Memory and size budgets live in [`scripts/ci-memory/budgets.json`](../scripts/ci
 
 Every PR and main push runs the benchmark with pinned Xcode 16.4. Job summaries show phase measurements; `resource-usage-macos-15` and `resource-usage-macos-15-intel` retain the Markdown report, JSON report, and raw samples for 90 days. Reports include protocol version, commit and dirty state, runner image, architecture, OS/compiler, fixture hashes, budgets, and workflow URL. Compare like architectures and protocols; the original v1 baseline did not exercise decoding or chunking.
 
+The host has an eight-minute workload deadline within a 20-minute CI job. Hosted pacing can make the 84-request workload substantially slower than a local run. Timeouts still fail CI and publish an explicitly incomplete failure report with partial samples; they never count as successful baselines.
+
 ### Regression tracking
 
 - **September 16, 2026 — multipart temporary buffers:** bounded `FileHandle` reads still accumulated autoreleased Foundation buffers on concurrency threads. In the local v1 workload, releasing buffers per block reduced sampled peak footprint from 52.6 to 12.7 MiB and retained growth from 24.3 to 4.7 MiB. The per-block pool is covered by the resource gate; do not remove it without an equivalent measured result.

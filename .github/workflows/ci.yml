@@ -13,7 +13,7 @@ permissions:
   contents: read
 jobs:
   test:
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     strategy:

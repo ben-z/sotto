@@ -7,6 +7,9 @@ import subprocess
 import signal
 import unittest
 import time
+import tempfile
+import json
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('benchmark', Path(__file__).with_name('benchmark-memory.py'))
 benchmark = importlib.util.module_from_spec(spec)
@@ -80,6 +83,15 @@ class BenchmarkTests(unittest.TestCase):
     def test_missing_chunked_phase_is_failure(self):
         with self.assertRaisesRegex(RuntimeError, 'chunked_upload'):
             ci.memory.summarize([dict(row, phase='chunked_upload') for row in fixture()][:1], ('chunked_upload',))
+
+    def test_incomplete_workload_retains_failure_report(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {}, clear=True):
+            output = Path(root)
+            ci.write_failure(output, RuntimeError('Benchmark host timed out'))
+            report = json.loads((output / 'report.json').read_text())
+            self.assertTrue(report['incomplete'])
+            self.assertEqual(report['failures'], ['Benchmark host timed out'])
+            self.assertIn('not a baseline', (output / 'report.md').read_text())
 
     def test_invalid_numbers_fail(self):
         for value in ('0', '-1', 'nan', 'inf'):

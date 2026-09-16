@@ -83,11 +83,33 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'work/ci-performance')
     args = parser.parse_args()
-    limits = load_budgets()
     if platform.system() != 'Darwin':
         raise RuntimeError('macOS runner required')
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output.resolve()
+    for name in ('report.json', 'report.md', 'samples.json'):
+        (output / name).unlink(missing_ok=True)
+    try:
+        run(output)
+    except Exception as error:
+        if not (output / 'report.json').exists():
+            write_failure(output, error)
+        raise
+
+
+def write_failure(output, error):
+    report = dict(protocol_version=2, incomplete=True, failures=[str(error)],
+                  commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip())
+    markdown = f"# CI resource benchmark\n\n**FAIL: {error}**\n\nThe workload is incomplete; partial samples are diagnostic data, not a baseline.\n"
+    (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
+    (output / 'report.md').write_text(markdown)
+    if os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+            stream.write(markdown)
+
+
+def run(output):
+    limits = load_budgets()
     binary = output / 'core-benchmark'
     subprocess.run(['swiftc', '-O', '-whole-module-optimization', '-swift-version', '6', '-parse-as-library',
                     '-module-name', 'SottoCore', *map(str, sorted((ROOT / 'Sources/SottoCore').glob('*.swift'))),
@@ -118,7 +140,7 @@ def main():
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ)
             phase, cycle = None, 0
-            deadline = time.monotonic() + 240
+            deadline = time.monotonic() + 480
             while process.poll() is None:
                 if time.monotonic() > deadline:
                     raise RuntimeError('Benchmark host timed out')
