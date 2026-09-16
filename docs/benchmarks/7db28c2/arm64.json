@@ -1,0 +1,250 @@
+{
+  "protocol_version": 4,
+  "workload": "optimized production core with deterministic loopback HTTP fixture; not the menu-bar app",
+  "commit": "7db28c2433850b20c85e0c05413b1cd1ef493575",
+  "dirty": false,
+  "runner": "GitHub Actions 1000004669",
+  "architecture": "arm64",
+  "macos": "15.7.9",
+  "image": "20260907.0337.1",
+  "swift": "swift-driver version: 1.120.5 Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)\nTarget: arm64-apple-macosx15.0",
+  "fixtures": {
+    "short": {
+      "seconds": 60,
+      "bytes": 1920044,
+      "sha256": "4c59ed976769ba50aba4a23ef2823cf795f0b555d48f4c80d41576ce9f3378b7"
+    },
+    "long": {
+      "seconds": 600,
+      "bytes": 19200044,
+      "sha256": "e14ff9e3be3d5257e57c029ea807754eaf22d1104999d69db4ec9e50e7c674d4"
+    },
+    "chunked": {
+      "seconds": 10800,
+      "bytes": 345600044,
+      "sha256": "fe646ba1e8b21fdc13902d9ab0ee8d78471f1b8a9b69755ed62ff6a0a6f37f83"
+    }
+  },
+  "response_fixtures": [
+    {
+      "workload": "short",
+      "seconds": 60,
+      "start_seconds": 0,
+      "words": 360,
+      "bytes": 24876,
+      "sha256": "b8e73583b9d43b3ee5152117a6f494073883b53aa1ac9750f78b57135288348c"
+    },
+    {
+      "workload": "long",
+      "seconds": 600,
+      "start_seconds": 0,
+      "words": 3600,
+      "bytes": 257412,
+      "sha256": "bed9156c7ea2aed0a936942d304a07c137eb3f0d3774c1a07a0b551aa94bacf5"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 0,
+      "words": 3600,
+      "bytes": 257412,
+      "sha256": "bed9156c7ea2aed0a936942d304a07c137eb3f0d3774c1a07a0b551aa94bacf5"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 600,
+      "words": 3600,
+      "bytes": 259632,
+      "sha256": "a77acb38fef00e71d8fd958fdc2b41e034556650111a6da9621befa35f5582a8"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 1200,
+      "words": 3600,
+      "bytes": 261232,
+      "sha256": "b9f9415b2c8850ec2ebc4182c0132b1e438c824f5eb85f894ce6384fec75b5ad"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 1800,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "51ddcdc20908a3cb1e22c70ae6b8237b28dc26f9a8b60ae9cd4c534b22c88019"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 2400,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "404771f55db3c3631b487eb41c88f5cefd4f40ee4df5afb42fce1a641ecca961"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 3000,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "a82e288da69d4063d3d12b36419efab680b00acb0fdddb27ce8621557167d877"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 3600,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "8216b7e7d9e2341fc545995108ec4fdcb6ae26189c210d6c4e0d713c77630a50"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 4200,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "952661d2bcef57921a29506ae90d2c1c8723da7c842af72e5136dfa7a60ceef5"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 4800,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "9e6c7bd8175bc5eaabdce355651ef53464d1e68aed9f88dfaf118d40a90eb101"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 5400,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "bc181ca1a1347adea4269377c1284b47775f15c0b1c6f7129e2ddefeac91d293"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 6000,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "6aeca3d7d04a98785f4d66a8ba54b31412900aa622ec5899bee40c5c176e9399"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 6600,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "ab13a2ad9da62a262c204566c50a73a63ed9519f12680bbe66ea373f8e7e460b"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 7200,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "07b8a89eba10d43137e4a4d8d07eb04dfcb4122ea07bb780fc8e7b4ff617b6b3"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 7800,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "d6464b92d9676a03c72f94f01632e54e77896f9c2cd040270f5e87e42d1b4383"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 8400,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "97bcbeb847e73632835ff48a11805c14f3bdf96bdfec07b555e7827f71c46dec"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 9000,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "9eab1c50f8646dd47a9109b17ff45a15c25e8f977bddb932428a0837c4478666"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 9600,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "74dcc22b9c358c4be7d445ebee570bb28a9f74a5a7336288976738712ae1639f"
+    },
+    {
+      "workload": "chunked",
+      "seconds": 600,
+      "start_seconds": 10200,
+      "words": 3600,
+      "bytes": 266832,
+      "sha256": "779813c85ef9191c0f5778c85572a79430f3a6037da90ef93beace54c2a06f02"
+    }
+  ],
+  "workload_timeout_seconds": 900,
+  "summary": {
+    "warmup": {
+      "samples": 2705,
+      "sampled_seconds": 59.840280417,
+      "footprint_median_mib": 6.079345703125,
+      "footprint_peak_mib": 11.001220703125,
+      "rss_peak_mib": 30.734375,
+      "cpu_percent": 2.0261494986614754
+    },
+    "idle_before": {
+      "samples": 231,
+      "sampled_seconds": 5.1994191249999915,
+      "footprint_median_mib": 5.860595703125,
+      "footprint_peak_mib": 5.860595703125,
+      "rss_peak_mib": 25.609375,
+      "cpu_percent": 0.0
+    },
+    "short_upload": {
+      "samples": 90,
+      "sampled_seconds": 1.944268749999992,
+      "footprint_median_mib": 5.219970703125,
+      "footprint_peak_mib": 6.188720703125,
+      "rss_peak_mib": 27.125,
+      "cpu_percent": 1.2579408067943363
+    },
+    "long_upload": {
+      "samples": 509,
+      "sampled_seconds": 11.39826425000004,
+      "footprint_median_mib": 5.173095703125,
+      "footprint_peak_mib": 6.079345703125,
+      "rss_peak_mib": 27.140625,
+      "cpu_percent": 0.9316360018002986
+    },
+    "chunked_upload": {
+      "samples": 9698,
+      "sampled_seconds": 217.448794041,
+      "footprint_median_mib": 5.360595703125,
+      "footprint_peak_mib": 9.657470703125,
+      "rss_peak_mib": 32.296875,
+      "cpu_percent": 1.2419829552258268
+    },
+    "idle_after": {
+      "samples": 226,
+      "sampled_seconds": 5.044183165999982,
+      "footprint_median_mib": 5.360595703125,
+      "footprint_peak_mib": 5.360595703125,
+      "rss_peak_mib": 27.078125,
+      "cpu_percent": 0.005497256097605919
+    }
+  },
+  "limits": {
+    "idle_peak_mib": 64,
+    "active_peak_mib": 96,
+    "idle_growth_mib": 16,
+    "bundle_mib": 2
+  },
+  "failures": [],
+  "bundle_bytes": 1592126,
+  "run_url": "https://github.com/ben-z/sotto/actions/runs/35058639668"
+}

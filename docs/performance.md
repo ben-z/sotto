@@ -10,9 +10,18 @@ The [September 8 live app report](performance-results.md) is a separate real-mic
 
 Live runs produce `report.md`, `report.json`, and `samples.json` in timestamped directories under `work/performance/`. Reports include machine/OS, executable hash, source revision/dirty state, model, and actual audio duration/size. Do not publish partial or failed runs as baselines.
 
-## Protocol v4
+## Protocol v4 baseline
 
-The [contiguous-chunk design](long-recordings.md) replaces transcript overlap reconciliation with pause-aware audio partitioning and paragraph assembly. V4 uses 18 parts per three-hour recording and 80 total uploads. Audio fixture bytes are unchanged from v3; response offsets and the expected paragraph output change. Speech-heavy response metadata is deliberately retained to keep the response-archive memory stress. The fixture server also checks bounded preceding-text context and the absence of word-timestamp requests. Memory budgets are unchanged. The [local arm64 v4 report](benchmarks/6a26011/local-arm64.json) completed all 80 uploads: 19.8 MiB sampled peak, idle median 19.4 → 14.0 MiB, and 1,636,148 packaged app bytes. It used macOS 26.2 and Swift 6.3.3 at `6a26011`; the report records a dirty tree because the AAC sample-continuity test was being strengthened during measurement. Production core and benchmark sources were unchanged. This is local validation, not a hosted-runner baseline. V2/v3 snapshots below remain historical; new v4 CI snapshots will be linked after a successful run.
+The [contiguous-chunk design](long-recordings.md) replaces transcript overlap reconciliation with pause-aware audio partitioning and paragraph assembly. V4 uses 18 parts per three-hour recording and 80 total uploads. Audio fixture bytes are unchanged from v3; response offsets and the expected paragraph output change. Speech-heavy response metadata is deliberately retained to keep the response-archive memory stress. The fixture server also checks bounded preceding-text context and the absence of word-timestamp requests. Memory budgets are unchanged. The [local arm64 v4 report](benchmarks/6a26011/local-arm64.json) completed all 80 uploads: 19.8 MiB sampled peak, idle median 19.4 → 14.0 MiB, and 1,636,148 packaged app bytes. It used macOS 26.2 and Swift 6.3.3 at `6a26011`; the report records a dirty tree because the AAC sample-continuity test was being strengthened during measurement. Production core and benchmark sources were unchanged. This is local validation, not a hosted-runner baseline. V2/v3 snapshots below remain historical.
+
+[Successful v4 CI run](https://github.com/ben-z/sotto/actions/runs/35058639668), September 16, 2026. The measured source was clean PR merge commit `7db28c2433850b20c85e0c05413b1cd1ef493575`, combining base `4dd044b4bf490bdd20ec6c8a24d8824795c56efa` and PR head `6a260116feb613de3e4787a1da53892237d853cf`. Both jobs passed all tests and resource gates. The unmodified reports preserve fixture hashes, budgets, environment, and workflow URL.
+
+| Runner | Idle median before / after (MiB) | Short / long / three-hour upload peak (MiB) | Warm-up peak (MiB) | Packaged app bytes |
+| --- | ---: | ---: | ---: | ---: |
+| [arm64 report](benchmarks/7db28c2/arm64.json) | 5.9 / 5.4 | 6.2 / 6.1 / 9.7 | 11.0 | 1,592,126 |
+| [x86_64 report](benchmarks/7db28c2/x86_64.json) | 8.6 / 8.9 | 8.8 / 11.2 / 13.5 | 11.3 | 1,593,038 |
+
+Both architectures completed all 80 uploads and verified 64,800 words as 18 paragraphs per three-hour transcription. Retained median changed by -0.50 MiB on arm64 and +0.36 MiB on Intel. Both used macOS 15.7.9, Xcode 16.4, and Swift 6.1.2; runner images were `20260907.0337.1` (arm64) and `20260824.0482.1` (Intel). Compare future v4 reports against the same architecture. These are production-core workload measurements, not full-app memory claims.
 
 ## Protocol v3 baseline (historical)
 
