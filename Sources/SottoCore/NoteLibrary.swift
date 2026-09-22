@@ -33,32 +33,86 @@ public final class NoteLibrary: ObservableObject {
     public func recoverInterrupted(excluding activeIDs: Set<String>) throws {
         for index in notes.indices where !activeIDs.contains(notes[index].id) {
             if notes[index].status == "recording" || notes[index].status == "transcribing" {
-                notes[index].status = notes[index].status == "recording" ? "interrupted" : "failed"
-                notes[index].error = "This operation was interrupted. Original audio is retained; select Transcribe to try again."
-                try archive.save(notes[index])
+                notes[index] = try Self.recover(notes[index], archive: archive)
             }
         }
     }
 
-    nonisolated private static func readRecords(archive: Archive) throws -> [RecordingRecord] {
-        let files = try FileManager.default.contentsOfDirectory(at: archive.directory, includingPropertiesForKeys: nil)
-        var records: [RecordingRecord] = []
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        for url in files where url.pathExtension == "json" && !url.lastPathComponent.hasSuffix(".response.json") {
-            var note: RecordingRecord
-            do { note = try decoder.decode(RecordingRecord.self, from: Data(contentsOf: url)) }
-            catch { throw SottoError("Cannot read \(url.lastPathComponent): \(error.localizedDescription)") }
-            guard note.id == url.deletingPathExtension().lastPathComponent,
-                  note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata in \(url.lastPathComponent)") }
-            if note.generatedTitle == nil && note.status == "complete" {
-                let transcript = archive.directory.appendingPathComponent("\(note.id).txt")
-                if FileManager.default.fileExists(atPath: transcript.path) {
-                    note.generatedTitle = RecordingRecord.suggestedTitle(from: try String(contentsOf: transcript, encoding: .utf8))
+    /// Publish a library only after every metadata read and recovery write succeeds.
+    public static func open(directory: URL, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws -> NoteLibrary {
+        let task = Task.detached {
+            try Task.checkCancellation()
+            await progress(.opening)
+            let archive: Archive
+            do { archive = try Archive(directory: directory) }
+            catch { throw NoteLoadFailure(operation: .openFolder, url: directory, underlying: error) }
+            let files = try metadataFiles(archive: archive)
+            var records: [RecordingRecord] = []
+            await progress(.reading(loaded: 0, total: files.count))
+            for url in files {
+                try Task.checkCancellation()
+                records.append(try readRecord(url, archive: archive))
+                await progress(.reading(loaded: records.count, total: files.count))
+            }
+            let interrupted = records.indices.filter { records[$0].status == "recording" || records[$0].status == "transcribing" }
+            if !interrupted.isEmpty {
+                await progress(.recovering(recovered: 0, total: interrupted.count))
+                for (completed, index) in interrupted.enumerated() {
+                    try Task.checkCancellation()
+                    records[index] = try recover(records[index], archive: archive)
+                    await progress(.recovering(recovered: completed + 1, total: interrupted.count))
                 }
             }
-            records.append(note)
+            try Task.checkCancellation()
+            return (archive, records.sorted { $0.startedAt > $1.startedAt })
         }
-        return records.sorted { $0.startedAt > $1.startedAt }
+        let (archive, records) = try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+        try Task.checkCancellation()
+        let library = NoteLibrary(archive: archive)
+        library.notes = records
+        return library
+    }
+
+    nonisolated private static func metadataFiles(archive: Archive) throws -> [URL] {
+        do {
+            return try FileManager.default.contentsOfDirectory(at: archive.directory, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "json" && !$0.lastPathComponent.hasSuffix(".response.json") }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        } catch { throw NoteLoadFailure(operation: .openFolder, url: archive.directory, underlying: error) }
+    }
+
+    nonisolated private static func readRecord(_ url: URL, archive: Archive) throws -> RecordingRecord {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        var note: RecordingRecord
+        do {
+            note = try decoder.decode(RecordingRecord.self, from: Data(contentsOf: url))
+            guard note.id == url.deletingPathExtension().lastPathComponent,
+                  note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata") }
+        } catch { throw NoteLoadFailure(operation: .readNote, url: url, underlying: error) }
+        if note.generatedTitle == nil && note.status == "complete" {
+            let transcript = archive.directory.appendingPathComponent("\(note.id).txt")
+            if FileManager.default.fileExists(atPath: transcript.path) {
+                do { note.generatedTitle = RecordingRecord.suggestedTitle(from: try String(contentsOf: transcript, encoding: .utf8)) }
+                catch { throw NoteLoadFailure(operation: .readNote, url: transcript, underlying: error) }
+            }
+        }
+        return note
+    }
+
+    nonisolated private static func readRecords(archive: Archive) throws -> [RecordingRecord] {
+        try metadataFiles(archive: archive).map { try readRecord($0, archive: archive) }
+            .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    nonisolated private static func recover(_ note: RecordingRecord, archive: Archive) throws -> RecordingRecord {
+        var recovered = note
+        recovered.status = note.status == "recording" ? "interrupted" : "failed"
+        recovered.error = "This operation was interrupted. Original audio is retained; select Transcribe to try again."
+        do { try archive.save(recovered) }
+        catch { throw NoteLoadFailure(operation: .recoverNote, url: archive.directory.appendingPathComponent("\(note.id).json"), underlying: error) }
+        return recovered
     }
 
     public func create(model: String, language: String?) throws -> RecordingRecord {

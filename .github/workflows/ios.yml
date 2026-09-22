@@ -95,6 +95,6 @@ jobs:
         with:
           name: ios-test-results
           path: |
-            work/ios-tests.xcresult
+            work/ios-tests*.xcresult
             work/ios-session.log
           if-no-files-found: error

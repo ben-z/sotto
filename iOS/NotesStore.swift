@@ -8,7 +8,24 @@ import UIKit
 @MainActor
 final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocationManagerDelegate {
     static let shared = NotesStore()
-    @Published var library: NoteLibrary?
+    enum LibraryState {
+        case idle
+        case loading(NoteLoadProgress, since: Date)
+        case failed(NoteLoadFailure, progress: NoteLoadProgress)
+        case ready(NoteLibrary)
+    }
+    @Published private(set) var libraryState: LibraryState = .idle
+    var library: NoteLibrary? {
+        if case .ready(let library) = libraryState { return library }
+        return nil
+    }
+    var openingLibrary: Bool {
+        if case .loading = libraryState { return true }
+        return false
+    }
+    private var openingTask: Task<Void, Never>?
+    private var selectedFolder: URL?
+    private var folder: NotesFolder?
     @Published var recording: RecordingRecord?
     @Published var preparing = false
     @Published var error: String?
@@ -37,7 +54,6 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     private var player: AVAudioPlayer?
     private var worker: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
-    private var scopedFolder: URL?
     private let bookmarkURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Sotto/folder.bookmark")
     var model: String { UserDefaults.standard.string(forKey: "notes.model") ?? "whisper-large-v3-turbo" }
     var maxRecordingSeconds: Double {
@@ -51,7 +67,6 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     override init() {
         super.init()
-        loadLibrary()
         refreshKey()
         NotificationCenter.default.addObserver(self, selector: #selector(audioInterrupted(_:)), name: AVAudioSession.interruptionNotification, object: nil)
         recorder.onUnexpectedStop = { [weak self] message in
@@ -60,20 +75,47 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     }
 
-    func loadLibrary() {
+    func openLibraryIfNeeded() async {
+        if case .idle = libraryState { await loadLibrary() }
+        else if let openingTask { await openingTask.value }
+    }
+
+    func loadLibrary() async {
         guard library == nil else { return }
-        scopedFolder?.stopAccessingSecurityScopedResource(); scopedFolder = nil
-        error = nil
-        do {
-            var directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Recordings")
-            if FileManager.default.fileExists(atPath: bookmarkURL.path) {
-                var stale = false
-                let folder = try URL(resolvingBookmarkData: Data(contentsOf: bookmarkURL), bookmarkDataIsStale: &stale)
-                guard !stale, folder.startAccessingSecurityScopedResource() else { throw SottoError("The saved recording folder is unavailable. Restore its access before opening notes.") }
-                scopedFolder = folder; directory = folder
+        await startOpening().value
+    }
+
+    private func startOpening() -> Task<Void, Never> {
+        if let openingTask { return openingTask }
+        libraryState = .loading(.opening, since: Date())
+        let selectedFolder = selectedFolder
+        let bookmarkURL = bookmarkURL
+        let task = Task {
+            defer { openingTask = nil }
+            var progress = NoteLoadProgress.opening
+            do {
+                let destination = try await Task.detached {
+                    try NotesFolder(selected: selectedFolder, bookmarkURL: bookmarkURL)
+                }.value
+                let library = try await NoteLibrary.open(directory: destination.url) { update in
+                    progress = update
+                    self.libraryState = .loading(update, since: Date())
+                }
+                if selectedFolder != nil {
+                    try await Task.detached { try destination.saveBookmark(to: bookmarkURL) }.value
+                }
+                folder = destination
+                libraryState = .ready(library)
+            } catch {
+                let failure: NoteLoadFailure
+                if let reported = error as? NoteLoadFailure { failure = reported }
+                else { failure = NoteLoadFailure(operation: .openFolder, url: bookmarkURL, underlying: error) }
+                log.error("Opening notes failed: \(failure.technicalDetails, privacy: .public)")
+                libraryState = .failed(failure, progress: progress)
             }
-            library = try NoteLibrary(directory: directory)
-        } catch { self.error = error.localizedDescription }
+        }
+        openingTask = task
+        return task
     }
 
     @objc nonisolated private func audioInterrupted(_ notification: Notification) {
@@ -92,9 +134,15 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func toggleRecording() async {
         if recording != nil { finish(recordingError: nil); return }
-        guard !preparing, let library else { return }
-        preparing = true; error = nil; stopPlayback()
+        guard !preparing else { return }
+        preparing = true; error = nil
         defer { preparing = false }
+        await openLibraryIfNeeded()
+        guard let library else {
+            error = "Couldn’t open your notes. Open Sotto to review the error and try again."
+            return
+        }
+        stopPlayback()
         log.notice("Requesting microphone permission")
         guard await Recorder.requestPermission() else {
             log.error("Microphone permission denied")
@@ -151,17 +199,13 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     }
 
     func selectFolder(_ url: URL) throws {
+        guard !openingLibrary else { throw SottoError("Wait for the notes folder to finish opening.") }
         guard recording == nil, !preparing, worker == nil else { throw SottoError("Finish recording and transcription before changing folders.") }
         guard locationRequests.isEmpty else { throw SottoError("Wait for recording location capture to finish before changing folders.") }
-        guard url.startAccessingSecurityScopedResource() else { throw SottoError("Cannot access the chosen folder.") }
-        do {
-            let replacement = try NoteLibrary(directory: url)
-            let bookmark = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-            try FileManager.default.createDirectory(at: bookmarkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try bookmark.write(to: bookmarkURL, options: .atomic)
-            scopedFolder?.stopAccessingSecurityScopedResource(); scopedFolder = url
-            library = replacement; error = nil
-        } catch { url.stopAccessingSecurityScopedResource(); throw error }
+        error = nil
+        stopPlayback()
+        selectedFolder = url
+        _ = startOpening()
     }
 
     func deleteKey() throws {
@@ -264,4 +308,43 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
             if !flag { self.error = "Playback stopped unexpectedly. The original audio is retained." }
         }
     }
+}
+
+/// Keeps folder access alive for the full load and the lifetime of the open library.
+private final class NotesFolder: Sendable {
+    let url: URL
+    private let scoped: Bool
+
+    init(selected: URL?, bookmarkURL: URL) throws {
+        var target = selected
+        do {
+            if target == nil {
+                let data: Data
+                do { data = try Data(contentsOf: bookmarkURL) }
+                catch CocoaError.fileReadNoSuchFile {
+                    url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Recordings")
+                    scoped = false
+                    return
+                }
+                var stale = false
+                target = try URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale)
+                guard !stale else { throw SottoError("The saved folder access has expired. Choose the notes folder again.") }
+            }
+            guard let target, target.startAccessingSecurityScopedResource() else {
+                throw SottoError("Access to the notes folder was denied. Choose the folder again to restore access.")
+            }
+            url = target
+            scoped = true
+        } catch { throw NoteLoadFailure(operation: .openFolder, url: target ?? bookmarkURL, underlying: error) }
+    }
+
+    func saveBookmark(to bookmarkURL: URL) throws {
+        do {
+            let bookmark = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+            try FileManager.default.createDirectory(at: bookmarkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try bookmark.write(to: bookmarkURL, options: .atomic)
+        } catch { throw NoteLoadFailure(operation: .saveFolder, url: bookmarkURL, underlying: error) }
+    }
+
+    deinit { if scoped { url.stopAccessingSecurityScopedResource() } }
 }

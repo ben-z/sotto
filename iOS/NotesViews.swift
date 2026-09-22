@@ -285,7 +285,7 @@ struct SettingsView: View {
                         DisclosureGroup("Folder location") { Text(directory.path).font(.caption).textSelection(.enabled) }
                     }
                     Button("Choose library folder") { folderError = nil; folderPicker = true }
-                        .disabled(store.recording != nil || store.preparing)
+                        .disabled(store.recording != nil || store.preparing || store.openingLibrary)
                     Text("The default folder is Files → On My iPhone → Sotto → Recordings. Choosing a folder opens its notes; existing notes stay in their current folder.").font(.caption).foregroundStyle(.secondary)
                     if let folderError { Text(folderError).font(.caption).foregroundStyle(.red) }
                     Text("Audio, the original transcript, and your edits are kept together. Back up this folder before deleting the app.").font(.caption).foregroundStyle(.secondary)

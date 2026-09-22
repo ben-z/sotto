@@ -2,6 +2,35 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    func testUnreadableNoteStopsLoading() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let failure = app.staticTexts["Couldn’t open your notes"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        let progress = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ of [0-9]+ notes loaded")).firstMatch
+        XCTAssertTrue(progress.exists)
+        let initialProgress = progress.label
+        let counts = initialProgress.split(separator: " ")
+        guard counts.count == 5, let loaded = Int(counts[0]), let total = Int(counts[2]) else {
+            XCTFail("Loading failure must show validated and total note counts"); return
+        }
+        XCTAssertGreaterThanOrEqual(loaded, 3)
+        XCTAssertEqual(total, loaded + 1)
+        XCTAssertFalse(app.buttons["record-note"].exists)
+        XCTAssertFalse(app.buttons["note-ios-ui-fixture"].exists)
+        XCTAssertFalse(app.buttons["Choose notes folder"].exists)
+        XCTAssertFalse(app.progressIndicators.firstMatch.exists)
+        app.buttons["Try again"].tap()
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        XCTAssertEqual(progress.label, initialProgress)
+        app.buttons["Technical details"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "zzz-unreadable.json")).firstMatch.exists)
+        app.buttons["Copy details"].tap()
+        XCTAssertTrue(app.buttons["Details copied"].exists)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Library read failure details"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     private func enableLocation(in app: XCUIApplication) {
         app.buttons["Settings"].tap()
         app.swipeUp()
@@ -264,6 +293,11 @@ final class NotesUITests: XCTestCase {
         let recordingImage = XCTAttachment(screenshot: app.screenshot())
         recordingImage.name = "Recording"; recordingImage.lifetime = .keepAlways
         add(recordingImage)
+        // A one-shot location request needs foreground access before backgrounding.
+        let recordingRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label ENDSWITH %@", "note-", "Recording")).firstMatch
+        XCTAssertTrue(recordingRow.waitForExistence(timeout: 5)); recordingRow.tap()
+        XCTAssertTrue(app.buttons["recording-location"].waitForExistence(timeout: 10), "The simulated location must arrive before backgrounding")
+        app.navigationBars.buttons["Notes"].tap()
         // The wait gives the encoder enough audio to produce a playable file.
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
         XCUIDevice.shared.press(.home)
