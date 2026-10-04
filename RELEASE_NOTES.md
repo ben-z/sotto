@@ -3,7 +3,7 @@ Sotto v0.1.12 fixes iPhone recording shortcut failures caused by slow notes fold
 - The notes folder opens in the background with progress counts and explicit recovery status. The interface stays responsive while files load.
 - The recording shortcut waits for the folder to open. Starting a recording no longer rereads every older note.
 - Unreadable files stop loading and show the affected file, technical details, and a manual retry. Shortcuts receives a readable error when recording cannot start.
-- Deletion confirmations include an explicit Cancel button.
+- Deleting notes and replacing edited text with a transcript require confirmation with an explicit Cancel button.
 
 Groq account quotas still apply. Failed transcriptions retain the audio; retrying starts from the beginning. Recognition can omit or repeat speech, especially with highly repetitive audio or cuts during uninterrupted speech.
 
