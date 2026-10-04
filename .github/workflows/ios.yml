@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: error
   simulator:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
@@ -95,6 +95,6 @@ jobs:
         with:
           name: ios-test-results
           path: |
-            work/ios-tests.xcresult
+            work/ios-tests*.xcresult
             work/ios-session.log
           if-no-files-found: error

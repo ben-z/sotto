@@ -8,7 +8,8 @@ arch=$(uname -m)
 [[ "$arch" == arm64 || "$arch" == x86_64 ]] || { print -u2 "Unsupported architecture: $arch"; exit 1; }
 python3 scripts/check-bundle.py "$app"
 # This path intentionally produces ad-hoc builds, never a notarized-release fallback.
-codesign -dv "$app" 2>&1 | grep -q 'Signature=adhoc' || { print -u2 'Expected an ad-hoc CI build'; exit 1; }
+signature=$(codesign -dv "$app" 2>&1)
+[[ "$signature" == *'Signature=adhoc'* ]] || { print -u2 'Expected an ad-hoc CI build'; exit 1; }
 [[ "$(lipo -archs "$app/Contents/MacOS/sotto")" == "$arch" ]] || { print -u2 'App does not match runner architecture'; exit 1; }
 out="$PWD/.build/ci-download"
 mkdir -p "$out"

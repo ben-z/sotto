@@ -70,7 +70,8 @@ public struct NoteContent: View {
                     }
                 }.noteSheetSize()
             }
-            .confirmationDialog("Replace edited note?", isPresented: $replacing, titleVisibility: .visible) {
+            .alert("Replace edited note?", isPresented: $replacing) {
+                Button("Cancel", role: .cancel) { }
                 Button("Replace note", role: .destructive) {
                     do { try library.useMachineTranscript(for: note); error = nil }
                     catch { self.error = error.localizedDescription }

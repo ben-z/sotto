@@ -112,7 +112,8 @@ struct NotesView: View {
                     }
                 }
             }
-            .confirmationDialog(deleting.count == 1 ? "Delete this note?" : "Delete \(deleting.count) notes?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            .alert(deleting.count == 1 ? "Delete this note?" : "Delete \(deleting.count) notes?", isPresented: $confirmDelete) {
+                Button("Cancel", role: .cancel) { }
                 Button("Delete permanently", role: .destructive) {
                     do { try store.delete(deleting); selection.subtract(deleting) }
                     catch { store.error = error.localizedDescription }
@@ -172,7 +173,8 @@ struct NoteView: View {
                 Button("Cancel", role: .cancel) { }
                 Button("Save") { do { try library.rename(note, to: draftTitle) } catch { self.error = error.localizedDescription } }
             }
-            .confirmationDialog("Delete this note?", isPresented: $deleting, titleVisibility: .visible) {
+            .alert("Delete this note?", isPresented: $deleting) {
+                Button("Cancel", role: .cancel) { }
                 Button("Delete permanently", role: .destructive) {
                     do { try store.delete([id]); dismiss() } catch { self.error = error.localizedDescription }
                 }
@@ -285,7 +287,7 @@ struct SettingsView: View {
                         DisclosureGroup("Folder location") { Text(directory.path).font(.caption).textSelection(.enabled) }
                     }
                     Button("Choose library folder") { folderError = nil; folderPicker = true }
-                        .disabled(store.recording != nil || store.preparing)
+                        .disabled(store.recording != nil || store.preparing || store.openingLibrary)
                     Text("The default folder is Files → On My iPhone → Sotto → Recordings. Choosing a folder opens its notes; existing notes stay in their current folder.").font(.caption).foregroundStyle(.secondary)
                     if let folderError { Text(folderError).font(.caption).foregroundStyle(.red) }
                     Text("Audio, the original transcript, and your edits are kept together. Back up this folder before deleting the app.").font(.caption).foregroundStyle(.secondary)
