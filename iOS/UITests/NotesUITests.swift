@@ -64,9 +64,9 @@ final class NotesUITests: XCTestCase {
 
     private func enableLocation(in app: XCUIApplication) {
         app.buttons["Settings"].tap()
-        app.swipeUp()
         let location = app.switches["Save recording location"]
         XCTAssertTrue(location.waitForExistence(timeout: 5))
+        XCTAssertTrue(location.isHittable, "The location switch must be visible before tapping it")
         if location.value as? String == "0" {
             location.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
             let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow While Using App"]

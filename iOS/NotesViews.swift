@@ -207,6 +207,13 @@ struct SettingsView: View {
     @State private var checking = false
     @State private var keyResult: Result<String, Error>?
 
+    private func buildInfo(_ key: String) -> String {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String, !value.isEmpty else {
+            preconditionFailure("Required app build metadata is missing: \(key)")
+        }
+        return value
+    }
+
     private func verifyKey(_ candidate: String) async throws {
         #if DEBUG && targetEnvironment(simulator)
         // UI tests cover presentation/persistence; core tests cover HTTP parsing.
@@ -295,6 +302,13 @@ struct SettingsView: View {
                 Section("Action Button") {
                     Text("In iPhone Settings → Action Button, choose Shortcut, then Sotto → Record a voice note.")
                     Text("The shortcut opens Sotto to record. Run it again or tap Stop to save. Recording continues when you lock your iPhone. Tap Stop in Sotto to finish.").font(.caption).foregroundStyle(.secondary)
+                }
+                Section("About") {
+                    LabeledContent("Version", value: buildInfo("CFBundleShortVersionString"))
+                    LabeledContent("Build", value: buildInfo("CFBundleVersion"))
+                    LabeledContent("Revision") {
+                        Text(buildInfo("SottoGitRevision")).monospaced().textSelection(.enabled)
+                    }
                 }
             }.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("Done") { dismiss() } }
