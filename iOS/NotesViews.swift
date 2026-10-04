@@ -112,7 +112,7 @@ struct NotesView: View {
                     }
                 }
             }
-            .confirmationDialog(deleting.count == 1 ? "Delete this note?" : "Delete \(deleting.count) notes?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            .alert(deleting.count == 1 ? "Delete this note?" : "Delete \(deleting.count) notes?", isPresented: $confirmDelete) {
                 Button("Cancel", role: .cancel) { }
                 Button("Delete permanently", role: .destructive) {
                     do { try store.delete(deleting); selection.subtract(deleting) }
@@ -173,7 +173,7 @@ struct NoteView: View {
                 Button("Cancel", role: .cancel) { }
                 Button("Save") { do { try library.rename(note, to: draftTitle) } catch { self.error = error.localizedDescription } }
             }
-            .confirmationDialog("Delete this note?", isPresented: $deleting, titleVisibility: .visible) {
+            .alert("Delete this note?", isPresented: $deleting) {
                 Button("Cancel", role: .cancel) { }
                 Button("Delete permanently", role: .destructive) {
                     do { try store.delete([id]); dismiss() } catch { self.error = error.localizedDescription }

@@ -2,6 +2,14 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    private func deleteNote(_ row: XCUIElement, in app: XCUIApplication) {
+        let id = row.identifier
+        row.tap()
+        app.buttons["Delete note"].tap()
+        app.buttons["Delete permanently"].tap()
+        XCTAssertFalse(app.buttons[id].exists)
+    }
+
     func testRecordingShortcutStartsAfterColdLaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -21,12 +29,7 @@ final class NotesUITests: XCTestCase {
             stop.tap()
             let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in saved.count == count + 1 }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [added], timeout: 10), .completed)
-            let created = saved.firstMatch
-            let id = created.identifier
-            created.tap()
-            app.buttons["Delete note"].tap()
-            app.buttons["Delete permanently"].tap()
-            XCTAssertFalse(app.buttons[id].exists)
+            deleteNote(saved.firstMatch, in: app)
         }
     }
 
@@ -112,6 +115,7 @@ final class NotesUITests: XCTestCase {
         app.terminate(); app.launch()
         XCTAssertEqual(openLimit().value as? String, "180")
         app.buttons["Done"].tap()
+        deleteNote(saved.firstMatch, in: app)
     }
 
     func testLanguageSelectionPersists() {
@@ -174,6 +178,7 @@ final class NotesUITests: XCTestCase {
             app.buttons[id].tap()
             XCTAssertTrue(app.buttons["recording-location"].waitForExistence(timeout: 10))
             app.navigationBars.buttons["Notes"].tap()
+            deleteNote(app.buttons[id], in: app)
         }
     }
 
@@ -360,6 +365,8 @@ final class NotesUITests: XCTestCase {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Retained voice note"; attachment.lifetime = .keepAlways
         add(attachment)
+        app.navigationBars.buttons["Notes"].tap()
+        deleteNote(restored, in: app)
     }
     func testTranscriptReplacesEditedNoteOnlyAfterConfirmation() {
         continueAfterFailure = false
