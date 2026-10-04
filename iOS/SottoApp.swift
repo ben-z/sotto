@@ -127,9 +127,14 @@ struct RecordVoiceNote: AppIntent {
     static let openAppWhenRun = true
     @MainActor func perform() async throws -> some IntentResult {
         await NotesStore.shared.toggleRecording()
-        if let error = NotesStore.shared.error { throw SottoError(error) }
+        if let error = NotesStore.shared.error { throw RecordingIntentError(message: error) }
         return .result()
     }
+}
+
+private struct RecordingIntentError: Error, CustomLocalizedStringResourceConvertible {
+    let message: String
+    var localizedStringResource: LocalizedStringResource { "\(message)" }
 }
 
 struct SottoShortcuts: AppShortcutsProvider {
@@ -137,4 +142,3 @@ struct SottoShortcuts: AppShortcutsProvider {
         AppShortcut(intent: RecordVoiceNote(), phrases: ["Record a note in \(.applicationName)"], shortTitle: "Record a voice note", systemImageName: "mic")
     }
 }
-

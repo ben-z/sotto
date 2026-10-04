@@ -117,7 +117,8 @@ public final class NoteLibrary: ObservableObject {
 
     public func create(model: String, language: String?) throws -> RecordingRecord {
         let note = try archive.newRecord(model: model, language: language, prompt: "", contextTerms: [])
-        try reload()
+        notes.append(note)
+        notes.sort { $0.startedAt > $1.startedAt }
         return note
     }
 

@@ -2,6 +2,34 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    func testRecordingShortcutStartsAfterColdLaunch() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let shortcuts = XCUIApplication(bundleIdentifier: "com.apple.shortcuts")
+        shortcuts.launch()
+        for _ in 0..<3 {
+            app.terminate()
+            shortcuts.activate()
+            let action = shortcuts.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Record a voice note")).firstMatch
+            XCTAssertTrue(action.waitForExistence(timeout: 10), shortcuts.debugDescription)
+            action.tap()
+            let stop = app.buttons["Stop recording"]
+            XCTAssertTrue(stop.waitForExistence(timeout: 15), app.debugDescription)
+            let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved"))
+            let count = saved.count
+            Thread.sleep(forTimeInterval: 1)
+            stop.tap()
+            let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in saved.count == count + 1 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [added], timeout: 10), .completed)
+            let created = saved.firstMatch
+            let id = created.identifier
+            created.tap()
+            app.buttons["Delete note"].tap()
+            app.buttons["Delete permanently"].tap()
+            XCTAssertFalse(app.buttons[id].exists)
+        }
+    }
+
     func testUnreadableNoteStopsLoading() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()

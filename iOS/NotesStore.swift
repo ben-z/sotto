@@ -88,6 +88,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     private func startOpening() -> Task<Void, Never> {
         if let openingTask { return openingTask }
         libraryState = .loading(.opening, since: Date())
+        log.notice("Opening notes")
         let selectedFolder = selectedFolder
         let bookmarkURL = bookmarkURL
         let task = Task {
@@ -106,6 +107,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
                 }
                 folder = destination
                 libraryState = .ready(library)
+                log.notice("Opened \(library.notes.count) notes")
             } catch {
                 let failure: NoteLoadFailure
                 if let reported = error as? NoteLoadFailure { failure = reported }
@@ -139,7 +141,14 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         defer { preparing = false }
         await openLibraryIfNeeded()
         guard let library else {
-            error = "Couldn’t open your notes. Open Sotto to review the error and try again."
+            let message: String
+            if case .failed(let failure, _) = libraryState {
+                message = failure.localizedDescription
+            } else {
+                message = "The notes library is not ready after opening. Open Sotto to review the error and try again."
+            }
+            error = message
+            log.error("Recording could not start: \(message, privacy: .public)")
             return
         }
         stopPlayback()
@@ -166,7 +175,10 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
                 catch { return }
                 self?.finish(recordingError: nil)
             }
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+            log.error("Recording could not start: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func finish(recordingError: String?) {

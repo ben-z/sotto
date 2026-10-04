@@ -10,6 +10,22 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     return note
 }
 
+@MainActor @Test func creatingRecordingDoesNotRereadExistingNotes() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try NoteLibrary(directory: directory)
+    let first = try library.create(model: "whisper-large-v3-turbo", language: "en")
+    let metadata = directory.appendingPathComponent("\(first.id).json")
+    try FileManager.default.removeItem(at: metadata)
+    try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: false)
+    let second = try library.create(model: "whisper-large-v3", language: nil)
+    #expect(library.notes.map(\.id) == [second.id, first.id])
+    let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+    let saved = try decoder.decode(RecordingRecord.self, from: Data(contentsOf: directory.appendingPathComponent("\(second.id).json")))
+    #expect(saved.id == second.id)
+    #expect(saved.status == "recording")
+}
+
 @MainActor @Test func notesRecoverDurableQueueAndInterruptedRecording() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
