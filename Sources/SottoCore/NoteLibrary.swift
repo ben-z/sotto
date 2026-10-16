@@ -30,6 +30,50 @@ public final class NoteLibrary: ObservableObject {
         }.value
     }
 
+    /// Read saved notes without replacing notes created or edited during the read.
+    public func loadHistory(progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
+        let archive = archive
+        let task = Task.detached {
+            let files = try Self.metadataFiles(archive: archive)
+            var records: [RecordingRecord] = []
+            await progress(.reading(loaded: 0, total: files.count))
+            for url in files {
+                try Task.checkCancellation()
+                records.append(try Self.readRecord(url, archive: archive))
+                await progress(.reading(loaded: records.count, total: files.count))
+            }
+            return records
+        }
+        let records = try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+        try Task.checkCancellation()
+        let activeIDs = Set(notes.map(\.id))
+        let recovery = Task.detached {
+            var recovered = records
+            let interrupted = recovered.indices.filter {
+                !activeIDs.contains(recovered[$0].id) && (recovered[$0].status == "recording" || recovered[$0].status == "transcribing")
+            }
+            if !interrupted.isEmpty {
+                await progress(.recovering(recovered: 0, total: interrupted.count))
+                for (completed, index) in interrupted.enumerated() {
+                    try Task.checkCancellation()
+                    recovered[index] = try Self.recover(recovered[index], archive: archive)
+                    await progress(.recovering(recovered: completed + 1, total: interrupted.count))
+                }
+            }
+            return recovered
+        }
+        let recovered = try await withTaskCancellationHandler {
+            try await recovery.value
+        } onCancel: { recovery.cancel() }
+        try Task.checkCancellation()
+        let live = Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0) })
+        let scanned = Set(recovered.map(\.id))
+        notes = (recovered.map { live[$0.id] ?? $0 } + notes.filter { !scanned.contains($0.id) })
+            .sorted { $0.startedAt > $1.startedAt }
+    }
+
     public func recoverInterrupted(excluding activeIDs: Set<String>) throws {
         for index in notes.indices where !activeIDs.contains(notes[index].id) {
             if notes[index].status == "recording" || notes[index].status == "transcribing" {
@@ -40,38 +84,12 @@ public final class NoteLibrary: ObservableObject {
 
     /// Publish a library only after every metadata read and recovery write succeeds.
     public static func open(directory: URL, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws -> NoteLibrary {
-        let task = Task.detached {
-            try Task.checkCancellation()
-            await progress(.opening)
-            let archive: Archive
-            do { archive = try Archive(directory: directory) }
-            catch { throw NoteLoadFailure(operation: .openFolder, url: directory, underlying: error) }
-            let files = try metadataFiles(archive: archive)
-            var records: [RecordingRecord] = []
-            await progress(.reading(loaded: 0, total: files.count))
-            for url in files {
-                try Task.checkCancellation()
-                records.append(try readRecord(url, archive: archive))
-                await progress(.reading(loaded: records.count, total: files.count))
-            }
-            let interrupted = records.indices.filter { records[$0].status == "recording" || records[$0].status == "transcribing" }
-            if !interrupted.isEmpty {
-                await progress(.recovering(recovered: 0, total: interrupted.count))
-                for (completed, index) in interrupted.enumerated() {
-                    try Task.checkCancellation()
-                    records[index] = try recover(records[index], archive: archive)
-                    await progress(.recovering(recovered: completed + 1, total: interrupted.count))
-                }
-            }
-            try Task.checkCancellation()
-            return (archive, records.sorted { $0.startedAt > $1.startedAt })
-        }
-        let (archive, records) = try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: { task.cancel() }
-        try Task.checkCancellation()
+        progress(.opening)
+        let archive: Archive
+        do { archive = try await Task.detached { try Archive(directory: directory) }.value }
+        catch { throw NoteLoadFailure(operation: .openFolder, url: directory, underlying: error) }
         let library = NoteLibrary(archive: archive)
-        library.notes = records
+        try await library.loadHistory(progress: progress)
         return library
     }
 

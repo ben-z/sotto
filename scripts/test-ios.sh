@@ -30,7 +30,7 @@ unreadablePending=true
 trap cleanup EXIT
 xcodebuild "${build[@]}" "${testOptions[@]}" \
   -resultBundlePath "${result%.xcresult}-opening-failure.xcresult" \
-  -only-testing:SottoUITests/NotesUITests/testUnreadableNoteStopsLoading test-without-building
+  -only-testing:SottoUITests/NotesUITests/testUnreadableNoteDoesNotBlockRecording test-without-building
 removeUnreadableFixture
 unreadablePending=false
 # Each location check gets a fresh fix before launching its app.
@@ -41,7 +41,7 @@ for locationTest in testBackToBackRecordingsKeepTheirLocations testRecordEditAnd
     "-only-testing:SottoUITests/NotesUITests/$locationTest" test-without-building
 done
 xcodebuild "${build[@]}" "${testOptions[@]}" \
-  -skip-testing:SottoUITests/NotesUITests/testUnreadableNoteStopsLoading \
+  -skip-testing:SottoUITests/NotesUITests/testUnreadableNoteDoesNotBlockRecording \
   -skip-testing:SottoUITests/NotesUITests/testBackToBackRecordingsKeepTheirLocations \
   -skip-testing:SottoUITests/NotesUITests/testRecordEditAndRecoverWithoutKey \
   -resultBundlePath "$result" test-without-building

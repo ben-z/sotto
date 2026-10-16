@@ -33,10 +33,10 @@ final class NotesUITests: XCTestCase {
         }
     }
 
-    func testUnreadableNoteStopsLoading() {
+    func testUnreadableNoteDoesNotBlockRecording() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
-        let failure = app.staticTexts["Couldn’t open your notes"]
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "load earlier notes")).firstMatch
         XCTAssertTrue(failure.waitForExistence(timeout: 10))
         let progress = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ of [0-9]+ notes loaded")).firstMatch
         XCTAssertTrue(progress.exists)
@@ -47,19 +47,27 @@ final class NotesUITests: XCTestCase {
         }
         XCTAssertGreaterThanOrEqual(loaded, 3)
         XCTAssertEqual(total, loaded + 1)
-        XCTAssertFalse(app.buttons["record-note"].exists)
+        XCTAssertTrue(app.buttons["record-note"].exists)
         XCTAssertFalse(app.buttons["note-ios-ui-fixture"].exists)
         XCTAssertFalse(app.buttons["Choose notes folder"].exists)
         XCTAssertFalse(app.progressIndicators.firstMatch.exists)
+        app.buttons["record-note"].tap()
+        XCTAssertTrue(app.buttons["Stop recording"].waitForExistence(timeout: 10))
+        Thread.sleep(forTimeInterval: 1)
+        app.buttons["Stop recording"].tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10))
         app.buttons["Try again"].tap()
         XCTAssertTrue(failure.waitForExistence(timeout: 10))
-        XCTAssertEqual(progress.label, initialProgress)
+        XCTAssertEqual(progress.label, "\(loaded + 1) of \(total + 1) notes loaded")
+        XCTAssertTrue(saved.exists)
         app.buttons["Technical details"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "zzz-unreadable.json")).firstMatch.exists)
         app.buttons["Copy details"].tap()
         XCTAssertTrue(app.buttons["Details copied"].exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Library read failure details"; attachment.lifetime = .keepAlways; add(attachment)
+        deleteNote(saved, in: app)
     }
 
     private func enableLocation(in app: XCUIApplication) {

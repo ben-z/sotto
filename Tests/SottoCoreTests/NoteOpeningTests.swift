@@ -133,6 +133,41 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     #expect(events == [.opening, .reading(loaded: 0, total: 0)])
 }
 
+@MainActor @Test func recordingCreatedDuringHistoryLoadSurvivesRecovery() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let archive = try Archive(directory: directory)
+    _ = try fixture(archive, id: "a", status: "complete")
+    _ = try fixture(archive, id: "b", status: "recording")
+    let library = NoteLibrary(archive: archive)
+    var active: RecordingRecord?
+    try await library.loadHistory { progress in
+        if progress == .reading(loaded: 1, total: 2) {
+            do { active = try library.create(model: "fixture", language: "en") }
+            catch { Issue.record("Could not start a recording while history loaded: \(error)") }
+        }
+    }
+    let recording = try #require(active)
+    #expect(library.notes.first { $0.id == recording.id }?.status == "recording")
+    #expect(library.notes.first { $0.id == "b" }?.status == "interrupted")
+    #expect(library.notes.count == 3)
+    let stored = try Data(contentsOf: directory.appendingPathComponent("\(recording.id).json"))
+    let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+    #expect(try decoder.decode(RecordingRecord.self, from: stored).status == "recording")
+}
+
+@MainActor @Test func corruptHistoryDoesNotDiscardNewRecording() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let archive = try Archive(directory: directory)
+    try Data("{".utf8).write(to: directory.appendingPathComponent("a.json"))
+    let library = NoteLibrary(archive: archive)
+    let recording = try library.create(model: "fixture", language: "en")
+    await #expect(throws: NoteLoadFailure.self) { try await library.loadHistory { _ in } }
+    #expect(library.notes.map(\.id) == [recording.id])
+    #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(recording.id).json").path))
+}
+
 @MainActor @Test func unavailableFolderPreservesTheUnderlyingError() async throws {
     let file = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: file) }
