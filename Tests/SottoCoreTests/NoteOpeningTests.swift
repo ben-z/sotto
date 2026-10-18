@@ -22,8 +22,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     var events: [NoteLoadProgress] = []
     let library = try await NoteLibrary.open(directory: directory) { events.append($0) }
     #expect(events == [.opening, .reading(loaded: 0, total: 3), .reading(loaded: 1, total: 3),
-                      .reading(loaded: 2, total: 3), .reading(loaded: 3, total: 3),
-                      .recovering(recovered: 0, total: 2), .recovering(recovered: 1, total: 2), .recovering(recovered: 2, total: 2)])
+                      .reading(loaded: 2, total: 3), .reading(loaded: 3, total: 3)])
     #expect(library.notes.first { $0.id == "a" }?.status == "interrupted")
     #expect(library.notes.first { $0.id == "b" }?.status == "failed")
     #expect(library.notes.first { $0.id == "c" }?.status == "complete")
@@ -32,7 +31,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     #expect(try NoteLibrary(directory: directory).notes.allSatisfy { $0.status != "recording" && $0.status != "transcribing" })
 }
 
-@MainActor @Test func malformedNoteStopsOpeningWithoutRecoveryOrPartialResults() async throws {
+@MainActor @Test func malformedNoteStopsLoadingAndKeepsEarlierPublishedNotes() async throws {
     let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)
@@ -41,10 +40,11 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     let broken = directory.appendingPathComponent("b.json")
     try Data("{".utf8).write(to: broken)
     _ = try fixture(archive, id: "c", status: "recording")
+    let library = NoteLibrary(archive: archive)
     var events: [NoteLoadProgress] = []
     do {
-        _ = try await NoteLibrary.open(directory: directory) { events.append($0) }
-        Issue.record("A partial library must never be returned")
+        try await library.loadHistory { events.append($0) }
+        Issue.record("An unreadable note must fail the load")
     } catch let failure as NoteLoadFailure {
         #expect(failure.operation == .readNote)
         #expect(failure.url.lastPathComponent == broken.lastPathComponent)
@@ -52,12 +52,14 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
         #expect(failure.underlying is DecodingError)
         #expect(failure.technicalDetails.contains("b.json"))
     }
-    #expect(events == [.opening, .reading(loaded: 0, total: 3), .reading(loaded: 1, total: 3)])
+    #expect(events == [.reading(loaded: 0, total: 3), .reading(loaded: 1, total: 3)])
+    #expect(library.notes.map(\.id) == ["c"])
+    #expect(library.notes.first?.status == "interrupted")
     #expect(try Data(contentsOf: directory.appendingPathComponent("a.json")) == original)
     _ = try fixture(archive, id: "b", status: "complete")
-    let retried = try await NoteLibrary.open(directory: directory) { _ in }
-    #expect(retried.notes.count == 3)
-    #expect(retried.notes.first { $0.id == "a" }?.status == "interrupted")
+    try await library.loadHistory { _ in }
+    #expect(library.notes.count == 3)
+    #expect(library.notes.first { $0.id == "a" }?.status == "interrupted")
 }
 
 @MainActor @Test func disappearedMetadataPreservesFileSystemErrorAndStopsAtThatNote() async throws {
@@ -66,7 +68,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     let archive = try Archive(directory: directory)
     _ = try fixture(archive, id: "a", status: "complete")
     _ = try fixture(archive, id: "b", status: "complete")
-    let missing = directory.appendingPathComponent("b.json")
+    let missing = directory.appendingPathComponent("a.json")
     var mutationError: Error?
     var last = NoteLoadProgress.opening
     do {
@@ -93,34 +95,25 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)
-    _ = try fixture(archive, id: "a", status: "recording")
     _ = try fixture(archive, id: "b", status: "transcribing")
     let metadata = directory.appendingPathComponent("b.json")
     let original = try Data(contentsOf: metadata)
-    var mutationError: Error?
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
     var last = NoteLoadProgress.opening
     do {
-        _ = try await NoteLibrary.open(directory: directory) { progress in
-            last = progress
-            if progress == .recovering(recovered: 1, total: 2) {
-                do {
-                    try FileManager.default.removeItem(at: metadata)
-                    try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: false)
-                } catch { mutationError = error }
-            }
-        }
+        let library = NoteLibrary(archive: archive)
+        try await library.loadHistory { last = $0 }
         Issue.record("Failed recovery must not publish the library")
     } catch let failure as NoteLoadFailure {
         #expect(failure.operation == .recoverNote)
         #expect(failure.url.path == metadata.path)
         #expect(failure.technicalDetails.contains(NSCocoaErrorDomain))
     }
-    #expect(mutationError == nil)
-    #expect(last == .recovering(recovered: 1, total: 2))
-    try FileManager.default.removeItem(at: metadata)
-    try original.write(to: metadata)
+    #expect(last == .reading(loaded: 0, total: 1))
+    #expect(try Data(contentsOf: metadata) == original)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     let retried = try await NoteLibrary.open(directory: directory) { _ in }
-    #expect(retried.notes.first { $0.id == "a" }?.status == "interrupted")
     #expect(retried.notes.first { $0.id == "b" }?.status == "failed")
 }
 
@@ -156,6 +149,76 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     #expect(try decoder.decode(RecordingRecord.self, from: stored).status == "recording")
 }
 
+@MainActor @Test func historyPublishesEachNoteBeforeReportingItLoaded() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let archive = try Archive(directory: directory)
+    for (offset, id) in ["a", "b", "c"].enumerated() {
+        var note = try fixture(archive, id: id, status: "recording")
+        note.startedAt = Date(timeIntervalSince1970: Double(offset))
+        try archive.save(note)
+    }
+    let library = NoteLibrary(archive: archive)
+    var snapshots: [[String]] = []
+    try await library.loadHistory { progress in
+        if case .reading(let loaded, _) = progress {
+            #expect(library.notes.count == loaded)
+            #expect(library.notes.allSatisfy { $0.status == "interrupted" })
+            snapshots.append(library.notes.map(\.id))
+        }
+    }
+    #expect(snapshots == [[], ["c"], ["c", "b"], ["c", "b", "a"]])
+}
+
+@MainActor @Test func publishedHistoryCanBeEditedAndDeletedWhileLoading() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let archive = try Archive(directory: directory)
+    for id in ["a", "b", "c"] { _ = try fixture(archive, id: id, status: "complete") }
+    let library = NoteLibrary(archive: archive)
+    var mutationError: Error?
+    try await library.loadHistory { progress in
+        do {
+            if progress == .reading(loaded: 1, total: 3) {
+                let note = try #require(library.notes.first { $0.id == "c" })
+                try library.rename(note, to: "Edited during loading")
+            }
+            if progress == .reading(loaded: 2, total: 3) { try library.delete(["b"]) }
+        } catch { mutationError = error }
+    }
+    #expect(mutationError == nil)
+    #expect(library.notes.count == 2)
+    #expect(library.notes.first { $0.id == "c" }?.title == "Edited during loading")
+    #expect(!library.notes.contains { $0.id == "b" })
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("b.json").path))
+    try await library.loadHistory { progress in
+        if progress == .reading(loaded: 0, total: 2) {
+            do { try library.delete(["a"]) }
+            catch { mutationError = error }
+        }
+    }
+    #expect(mutationError == nil)
+    #expect(library.notes.map(\.id) == ["c"])
+    #expect(library.notes.first?.title == "Edited during loading")
+}
+
+@MainActor @Test func historyDoesNotReadAudioOrTranscriptForNotesWithSavedTitles() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let archive = try Archive(directory: directory)
+    var note = try fixture(archive, id: "a", status: "complete")
+    note.generatedTitle = "Saved title"
+    try archive.save(note)
+    for ext in ["m4a", "txt", "md"] {
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("a.\(ext)"), withIntermediateDirectories: false)
+    }
+    try Data("not metadata".utf8).write(to: directory.appendingPathComponent("a.response.json"))
+    let library = NoteLibrary(archive: archive)
+    try await library.loadHistory { _ in }
+    #expect(library.notes.first?.displayTitle == "Saved title")
+    #expect(throws: (any Error).self) { try library.text(for: note) }
+}
+
 @MainActor @Test func corruptHistoryDoesNotDiscardNewRecording() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -166,6 +229,18 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     await #expect(throws: NoteLoadFailure.self) { try await library.loadHistory { _ in } }
     #expect(library.notes.map(\.id) == [recording.id])
     #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(recording.id).json").path))
+}
+
+@MainActor @Test func retryStillValidatesMetadataForAlreadyVisibleNotes() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let archive = try Archive(directory: directory)
+    _ = try fixture(archive, id: "a", status: "complete")
+    let library = NoteLibrary(archive: archive)
+    try await library.loadHistory { _ in }
+    try Data("{".utf8).write(to: directory.appendingPathComponent("a.json"))
+    await #expect(throws: NoteLoadFailure.self) { try await library.loadHistory { _ in } }
+    #expect(library.notes.map(\.id) == ["a"])
 }
 
 @MainActor @Test func unavailableFolderPreservesTheUnderlyingError() async throws {
@@ -217,7 +292,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     #expect(last == .reading(loaded: 0, total: 1))
 }
 
-@MainActor @Test func cancellationStopsTheWorkerBeforeRecovery() async throws {
+@MainActor @Test func cancellationStopsBeforeReadingTheNextNote() async throws {
     let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)

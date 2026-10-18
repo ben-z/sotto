@@ -28,14 +28,11 @@ private struct HistoryStatus: View {
                 case .reading(let loaded, let total):
                     ProgressView(value: Double(loaded), total: Double(max(total, 1)))
                     Text("\(loaded) of \(total) notes loaded").foregroundStyle(.secondary)
-                case .recovering(let recovered, let total):
-                    ProgressView(value: Double(recovered), total: Double(max(total, 1)))
-                    Text("\(recovered) of \(total) interrupted notes recovered").foregroundStyle(.secondary)
                 }
             } header: { Text("Loading earlier notes") }
         case .failed(let failure, let progress):
             Section {
-                Text("Earlier notes could not be loaded. You can still record.")
+                Text("Some earlier notes could not be loaded. You can still record.")
                 if case .reading(let loaded, let total) = progress {
                     Text("\(loaded) of \(total) notes loaded").foregroundStyle(.secondary)
                 }

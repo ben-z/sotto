@@ -15,12 +15,12 @@ container="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
 python3 scripts/seed-ios-fixture.py "$container"
 result="${SOTTO_IOS_RESULT_PATH:-work/ios-tests-$(date -u +%Y%m%dT%H%M%SZ).xcresult}"
 # A directory with a metadata filename produces a real read error.
-unreadableFixture="$container/Documents/Recordings/zzz-unreadable.json"
+unreadableFixture="$container/Documents/Recordings/000-unreadable.json"
 mkdir "$unreadableFixture"
 removeUnreadableFixture() {
   local currentContainer
   currentContainer="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
-  rmdir "$currentContainer/Documents/Recordings/zzz-unreadable.json"
+  rmdir "$currentContainer/Documents/Recordings/000-unreadable.json"
 }
 cleanup() {
   if [[ "$unreadablePending" == true ]]; then removeUnreadableFixture; fi
