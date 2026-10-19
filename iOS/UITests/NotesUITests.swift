@@ -14,6 +14,9 @@ final class NotesUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         let shortcuts = XCUIApplication(bundleIdentifier: "com.apple.shortcuts")
+        addTeardownBlock {
+            await MainActor.run { XCUIApplication().terminate() }
+        }
         shortcuts.launch()
         for _ in 0..<3 {
             app.terminate()
@@ -21,6 +24,9 @@ final class NotesUITests: XCTestCase {
             let action = shortcuts.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Record a voice note")).firstMatch
             XCTAssertTrue(action.waitForExistence(timeout: 10), shortcuts.debugDescription)
             action.tap()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "The shortcut must bring Sotto to the foreground")
+            // Attach XCTest to the process launched by Shortcuts before querying its UI.
+            app.activate()
             let stop = app.buttons["Stop recording"]
             XCTAssertTrue(stop.waitForExistence(timeout: 15), app.debugDescription)
             let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved"))
