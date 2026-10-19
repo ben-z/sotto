@@ -40,8 +40,16 @@ for locationTest in testBackToBackRecordingsKeepTheirLocations testRecordEditAnd
     -resultBundlePath "${result%.xcresult}-$locationTest.xcresult" \
     "-only-testing:SottoUITests/NotesUITests/$locationTest" test-without-building
 done
+# The real one-minute recording plus settings and relaunch checks need their own budget.
+recordingLimitAllowance=180
+xcodebuild "${build[@]}" -test-timeouts-enabled YES \
+  -default-test-execution-time-allowance "$recordingLimitAllowance" \
+  -maximum-test-execution-time-allowance "$recordingLimitAllowance" \
+  -resultBundlePath "${result%.xcresult}-recording-limit.xcresult" \
+  -only-testing:SottoUITests/NotesUITests/testRecordingLimitPersistsAndStopsAtCapturedDeadline test-without-building
 xcodebuild "${build[@]}" "${testOptions[@]}" \
   -skip-testing:SottoUITests/NotesUITests/testUnreadableNoteDoesNotBlockRecording \
   -skip-testing:SottoUITests/NotesUITests/testBackToBackRecordingsKeepTheirLocations \
   -skip-testing:SottoUITests/NotesUITests/testRecordEditAndRecoverWithoutKey \
+  -skip-testing:SottoUITests/NotesUITests/testRecordingLimitPersistsAndStopsAtCapturedDeadline \
   -resultBundlePath "$result" test-without-building
