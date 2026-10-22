@@ -101,8 +101,10 @@ final class NotesUITests: XCTestCase {
             return field
         }
         func enter(_ value: String, into field: XCUIElement) {
-            field.doubleTap()
+            field.tap()
+            field.typeKey("a", modifierFlags: .command)
             field.typeText(value)
+            XCTAssertEqual(field.value as? String, value)
             app.buttons["Done"].tap()
         }
         let limit = openLimit()
