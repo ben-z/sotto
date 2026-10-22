@@ -14,6 +14,8 @@ Note details show the model used for the latest successful transcription. **Retr
 
 Use **Select** on the main list to transcribe or delete several notes. Swipe or long-press a row to delete one. Deletion requires confirmation and permanently removes the audio, metadata, transcripts, and edits. Active recordings and transcriptions cannot be deleted or requeued.
 
+Loading history does not change saved recording or transcription statuses. An **Unfinished recording** or **Unfinished transcription** stays protected until you open it and choose **Recover note…**. Stop the operation on any other device and let its files sync before confirming recovery. Recovery keeps saved audio and text, then allows editing, transcription, or deletion. Changes to the same note from multiple devices are not coordinated.
+
 Dates include a timezone. New recordings retain the timezone where they were started; older notes without that metadata use your current timezone. **Save recording location** in Settings is optional and off by default. It captures one location fix, stores coordinates and accuracy locally, and links to Maps. It does not track movement in the background or send location to Groq. Unavailable or denied location never prevents recording.
 
 ## Storage and privacy
@@ -24,7 +26,7 @@ The Groq key is stored in the device’s Keychain. Transcription sends the recor
 
 ## Action Button
 
-Choose **Settings → Action Button → Shortcut → Sotto → Record a voice note**. The App Shortcut opens Sotto and starts recording; running it again stops and saves. The audio background mode keeps an active recording running when you leave the app or lock your phone. A system audio interruption finalizes the current note. Force-quitting during recording can leave an incomplete audio file; Sotto flags it on relaunch. Recordings stop after **3 hours** by default. **Settings → Recording limit** lets you choose 1–1,440 minutes (up to 24 hours); changes apply to new recordings.
+Choose **Settings → Action Button → Shortcut → Sotto → Record a voice note**. The App Shortcut opens Sotto and starts recording; running it again stops and saves. The audio background mode keeps an active recording running when you leave the app or lock your phone. A system audio interruption finalizes the current note. Force-quitting during recording can leave an incomplete audio file; open the unfinished note and choose **Recover note…** after relaunch. Recordings stop after **3 hours** by default. **Settings → Recording limit** lets you choose 1–1,440 minutes (up to 24 hours); changes apply to new recordings.
 
 Audio at or above 25 MB is split into sequential uploads below [Groq’s 25 MB attachment limit](https://console.groq.com/docs/speech-to-text), keeping the original recording intact. Chunks cover the audio consecutively and prefer pauses, using preceding-text context when no explicit prompt is supplied. Each part becomes a paragraph; uninterrupted speech can still be cut mid-word. See the [design and tradeoffs](../docs/long-recordings.md). The final transcript combines all parts; `.response.json` retains the per-part responses and offsets. [Account quotas](https://console.groq.com/docs/rate-limits) still apply: Groq’s published free-tier limits are two audio hours per hour and eight per day, so a 3-hour transcription can exhaust the hourly quota. A failed or cancelled transcription keeps the audio; selecting Transcribe restarts from the beginning and can bill earlier parts again.
 

@@ -17,12 +17,11 @@ public final class NoteLibrary: ObservableObject {
 
     public convenience init(directory: URL) throws {
         self.init(archive: try Archive(directory: directory))
-        try reload(recover: true)
+        try reload()
     }
 
-    public func reload(recover: Bool = false, excluding activeIDs: Set<String> = []) throws {
+    public func reload() throws {
         notes = try Self.readRecords(archive: archive)
-        if recover { try recoverInterrupted(excluding: activeIDs) }
     }
 
     public func reloadAsync() async throws {
@@ -32,7 +31,7 @@ public final class NoteLibrary: ObservableObject {
         }.value
     }
 
-    /// Publish each saved note after validating and recovering it, preserving live changes.
+    /// Publish each validated saved note without changing its files, preserving live changes.
     public func loadHistory(progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
         guard historyChanges == nil else { throw SottoError("Note history is already loading.") }
         historyChanges = Set(notes.map(\.id))
@@ -45,15 +44,9 @@ public final class NoteLibrary: ObservableObject {
                 try Task.checkCancellation()
                 let id = url.deletingPathExtension().lastPathComponent
                 do {
-                    var note = try Self.readRecord(url, archive: archive)
-                    if await self.historyChanges?.contains(id) == false {
-                        if note.status == "recording" || note.status == "transcribing" {
-                            try Task.checkCancellation()
-                            note = try Self.recover(note, archive: archive)
-                        }
-                        try Task.checkCancellation()
-                        await self.publishHistory(note)
-                    }
+                    let note = try Self.readRecord(url, archive: archive)
+                    try Task.checkCancellation()
+                    await self.publishHistory(note)
                 } catch {
                     try Task.checkCancellation()
                     // A note deleted through this library can disappear during its read.
@@ -78,15 +71,28 @@ public final class NoteLibrary: ObservableObject {
         notes.insert(note, at: index)
     }
 
-    public func recoverInterrupted(excluding activeIDs: Set<String>) throws {
-        for index in notes.indices where !activeIDs.contains(notes[index].id) {
-            if notes[index].status == "recording" || notes[index].status == "transcribing" {
-                notes[index] = try Self.recover(notes[index], archive: archive)
-            }
+    /// Recovery is an explicit action after stopping the operation on every device.
+    public func recover(_ id: String, activeRecordingID: String?) throws {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else {
+            throw SottoError("This note is no longer available.")
         }
+        guard id != activeRecordingID, id != transcribingID else {
+            throw SottoError("Stop this recording or transcription before recovering the note.")
+        }
+        let url = archive.directory.appendingPathComponent("\(id).json")
+        var note = try Self.readRecord(url, archive: archive)
+        guard note.hasUnfinishedOperation else {
+            historyChanges?.insert(id)
+            notes[index] = note
+            throw SottoError("This note changed elsewhere. Its current status has been loaded; review it before making changes.")
+        }
+        note.status = note.status == "recording" ? "interrupted" : "failed"
+        note.error = "Recovered unfinished operation. Select Transcribe to try again."
+        do { try save(note) }
+        catch { throw NoteLoadFailure(operation: .recoverNote, url: url, underlying: error) }
     }
 
-    /// Publish a library only after every metadata read and recovery write succeeds.
+    /// Publish a library only after every metadata read succeeds.
     public static func open(directory: URL, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws -> NoteLibrary {
         progress(.opening)
         let archive: Archive
@@ -130,15 +136,6 @@ public final class NoteLibrary: ObservableObject {
     nonisolated private static func readRecords(archive: Archive) throws -> [RecordingRecord] {
         try metadataFiles(archive: archive).map { try readRecord($0, archive: archive) }
             .sorted { $0.startedAt > $1.startedAt }
-    }
-
-    nonisolated private static func recover(_ note: RecordingRecord, archive: Archive) throws -> RecordingRecord {
-        var recovered = note
-        recovered.status = note.status == "recording" ? "interrupted" : "failed"
-        recovered.error = "This operation was interrupted. Original audio is retained; select Transcribe to try again."
-        do { try archive.save(recovered) }
-        catch { throw NoteLoadFailure(operation: .recoverNote, url: archive.directory.appendingPathComponent("\(note.id).json"), underlying: error) }
-        return recovered
     }
 
     public func create(model: String, language: String?) throws -> RecordingRecord {
@@ -207,10 +204,20 @@ public final class NoteLibrary: ObservableObject {
     private func editableNotes(_ ids: Set<String>) throws -> [RecordingRecord] {
         let selected = notes.filter { ids.contains($0.id) }
         guard selected.count == ids.count else { throw SottoError("Some selected notes are no longer available.") }
-        guard !selected.contains(where: { $0.status == "recording" || $0.id == transcribingID || $0.status == "transcribing" }) else {
-            throw SottoError("Wait for recording or transcription to finish before changing these notes.")
+        guard !selected.contains(where: { $0.hasUnfinishedOperation || $0.id == transcribingID }) else {
+            throw SottoError("Wait for active recordings and transcriptions to finish. Recover unfinished notes before changing them.")
         }
         return selected
+    }
+
+    private func editableMetadataNote(_ id: String, activeRecordingID: String?) throws -> RecordingRecord {
+        guard let note = notes.first(where: { $0.id == id }) else {
+            throw SottoError("This note is no longer available.")
+        }
+        guard !note.hasUnfinishedOperation || id == activeRecordingID || id == transcribingID else {
+            throw SottoError("Recover this unfinished note before changing it.")
+        }
+        return note
     }
 
     public func delete(_ ids: Set<String>) throws {
@@ -254,13 +261,14 @@ public final class NoteLibrary: ObservableObject {
     }
 
     public func saveText(_ text: String, for note: RecordingRecord) throws {
+        _ = try editableMetadataNote(note.id, activeRecordingID: nil)
         // Keep the machine transcript and raw response when a person edits their note.
         try text.write(to: archive.directory.appendingPathComponent("\(note.id).md"), atomically: true, encoding: .utf8)
         objectWillChange.send()
     }
 
-    public func rename(_ note: RecordingRecord, to title: String) throws {
-        var note = notes.first { $0.id == note.id } ?? note
+    public func rename(_ note: RecordingRecord, to title: String, activeRecordingID: String?) throws {
+        var note = try editableMetadataNote(note.id, activeRecordingID: activeRecordingID)
         note.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         try Self.loadMissingTitle(for: &note, archive: archive)
         try save(note)

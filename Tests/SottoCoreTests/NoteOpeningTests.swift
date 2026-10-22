@@ -9,7 +9,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     return record
 }
 
-@MainActor @Test func openingReportsValidatedCountsAndRecoversBeforeReturning() async throws {
+@MainActor @Test func openingAndReloadingLeaveExistingMetadataUnchanged() async throws {
     let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)
@@ -19,16 +19,23 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     _ = try fixture(archive, id: "b", status: "transcribing")
     _ = try fixture(archive, id: "c", status: "complete")
     try Data("not metadata".utf8).write(to: directory.appendingPathComponent("c.response.json"))
+    let originals = try ["a", "b", "c"].map { try Data(contentsOf: directory.appendingPathComponent("\($0).json")) }
     var events: [NoteLoadProgress] = []
     let library = try await NoteLibrary.open(directory: directory) { events.append($0) }
     #expect(events == [.opening, .reading(loaded: 0, total: 3), .reading(loaded: 1, total: 3),
                       .reading(loaded: 2, total: 3), .reading(loaded: 3, total: 3)])
-    #expect(library.notes.first { $0.id == "a" }?.status == "interrupted")
-    #expect(library.notes.first { $0.id == "b" }?.status == "failed")
+    #expect(library.notes.first { $0.id == "a" }?.status == "recording")
+    #expect(library.notes.first { $0.id == "b" }?.status == "transcribing")
     #expect(library.notes.first { $0.id == "c" }?.status == "complete")
     #expect(try String(contentsOf: archive.audioURL(note), encoding: .utf8) == "audio")
     #expect(try String(contentsOf: directory.appendingPathComponent("a.md"), encoding: .utf8) == "edited note")
-    #expect(try NoteLibrary(directory: directory).notes.allSatisfy { $0.status != "recording" && $0.status != "transcribing" })
+    try library.reload()
+    try await library.reloadAsync()
+    let reopened = try NoteLibrary(directory: directory)
+    #expect(reopened.notes.first { $0.id == "a" }?.status == "recording")
+    for (id, original) in zip(["a", "b", "c"], originals) {
+        #expect(try Data(contentsOf: directory.appendingPathComponent("\(id).json")) == original)
+    }
 }
 
 @MainActor @Test func malformedNoteStopsLoadingAndKeepsEarlierPublishedNotes() async throws {
@@ -54,12 +61,12 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     }
     #expect(events == [.reading(loaded: 0, total: 3), .reading(loaded: 1, total: 3)])
     #expect(library.notes.map(\.id) == ["c"])
-    #expect(library.notes.first?.status == "interrupted")
+    #expect(library.notes.first?.status == "recording")
     #expect(try Data(contentsOf: directory.appendingPathComponent("a.json")) == original)
     _ = try fixture(archive, id: "b", status: "complete")
     try await library.loadHistory { _ in }
     #expect(library.notes.count == 3)
-    #expect(library.notes.first { $0.id == "a" }?.status == "interrupted")
+    #expect(library.notes.first { $0.id == "a" }?.status == "recording")
 }
 
 @MainActor @Test func disappearedMetadataPreservesFileSystemErrorAndStopsAtThatNote() async throws {
@@ -91,7 +98,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     #expect(last == .reading(loaded: 1, total: 2))
 }
 
-@MainActor @Test func failedRecoveryWriteStopsOpeningAndCanBeRetried() async throws {
+@MainActor @Test func historyLoadsWithoutWritingAndExplicitRecoveryReportsDeniedWrite() async throws {
     let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)
@@ -101,20 +108,23 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
     defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
     var last = NoteLoadProgress.opening
+    let library = NoteLibrary(archive: archive)
+    try await library.loadHistory { last = $0 }
+    #expect(last == .reading(loaded: 1, total: 1))
     do {
-        let library = NoteLibrary(archive: archive)
-        try await library.loadHistory { last = $0 }
-        Issue.record("Failed recovery must not publish the library")
+        try library.recover("b", activeRecordingID: nil)
+        Issue.record("A denied recovery write must be reported")
     } catch let failure as NoteLoadFailure {
         #expect(failure.operation == .recoverNote)
         #expect(failure.url.path == metadata.path)
         #expect(failure.technicalDetails.contains(NSCocoaErrorDomain))
+        #expect(failure.localizedDescription.contains(failure.underlying.localizedDescription))
     }
-    #expect(last == .reading(loaded: 0, total: 1))
+    #expect(library.notes.first?.status == "transcribing")
     #expect(try Data(contentsOf: metadata) == original)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
-    let retried = try await NoteLibrary.open(directory: directory) { _ in }
-    #expect(retried.notes.first { $0.id == "b" }?.status == "failed")
+    try library.recover("b", activeRecordingID: nil)
+    #expect(library.notes.first?.status == "failed")
 }
 
 @MainActor @Test func emptyFolderFinishesWithoutRecovery() async throws {
@@ -126,7 +136,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     #expect(events == [.opening, .reading(loaded: 0, total: 0)])
 }
 
-@MainActor @Test func recordingCreatedDuringHistoryLoadSurvivesRecovery() async throws {
+@MainActor @Test func recordingCreatedDuringHistoryLoadSurvives() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)
@@ -142,7 +152,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     }
     let recording = try #require(active)
     #expect(library.notes.first { $0.id == recording.id }?.status == "recording")
-    #expect(library.notes.first { $0.id == "b" }?.status == "interrupted")
+    #expect(library.notes.first { $0.id == "b" }?.status == "recording")
     #expect(library.notes.count == 3)
     let stored = try Data(contentsOf: directory.appendingPathComponent("\(recording.id).json"))
     let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
@@ -163,7 +173,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     try await library.loadHistory { progress in
         if case .reading(let loaded, _) = progress {
             #expect(library.notes.count == loaded)
-            #expect(library.notes.allSatisfy { $0.status == "interrupted" })
+            #expect(library.notes.allSatisfy { $0.status == "recording" })
             snapshots.append(library.notes.map(\.id))
         }
     }
@@ -181,7 +191,7 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
         do {
             if progress == .reading(loaded: 1, total: 3) {
                 let note = try #require(library.notes.first { $0.id == "c" })
-                try library.rename(note, to: "Edited during loading")
+                try library.rename(note, to: "Edited during loading", activeRecordingID: nil)
             }
             if progress == .reading(loaded: 2, total: 3) { try library.delete(["b"]) }
         } catch { mutationError = error }
@@ -248,11 +258,11 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     try FileManager.default.createDirectory(at: transcript, withIntermediateDirectories: false)
     let library = NoteLibrary(archive: archive)
     try await library.loadHistory { _ in }
-    #expect(throws: NoteLoadFailure.self) { try library.rename(note, to: " ") }
+    #expect(throws: NoteLoadFailure.self) { try library.rename(note, to: " ", activeRecordingID: nil) }
     #expect(library.notes.first?.displayTitle == "Custom title")
     try FileManager.default.removeItem(at: transcript)
     try "The original transcript title".write(to: transcript, atomically: true, encoding: .utf8)
-    try library.rename(note, to: " ")
+    try library.rename(note, to: " ", activeRecordingID: nil)
     #expect(library.notes.first?.displayTitle == "The original transcript title")
     #expect(try NoteLibrary(directory: directory).notes.first?.displayTitle == "The original transcript title")
 }

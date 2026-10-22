@@ -256,6 +256,11 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         try library?.delete(ids)
     }
 
+    func recover(_ id: String) throws {
+        guard let library else { throw SottoError("The notes library is not ready.") }
+        try library.recover(id, activeRecordingID: recording?.id)
+    }
+
     private func captureLocation(for note: RecordingRecord) {
         guard locationEnabled else { return }
         let manager = CLLocationManager()

@@ -64,7 +64,7 @@ struct NotesView: View {
     @State private var draftTitle = ""
     @State private var showingErrorDetails = false
     private var selectionBusy: Bool {
-        library.notes.contains { selection.contains($0.id) && ["recording", "transcribing"].contains($0.status) }
+        library.notes.contains { selection.contains($0.id) && $0.hasUnfinishedOperation }
     }
     var body: some View {
         NavigationStack {
@@ -78,23 +78,23 @@ struct NotesView: View {
                     NavigationLink {
                         NoteView(store: store, library: library, id: note.id)
                     } label: {
-                        RecordingSummary(note: note)
+                        RecordingSummary(note: note, isActive: note.id == store.recording?.id || note.id == library.transcribingID)
                     }
                     .accessibilityIdentifier("note-\(note.id)")
                     .tag(note.id)
                     .contextMenu {
                         Button("Rename", systemImage: "pencil") {
                             renaming = note; draftTitle = note.title ?? note.generatedTitle ?? ""; renameShown = true
-                        }
+                        }.disabled(note.hasUnfinishedOperation && note.id != store.recording?.id && note.id != library.transcribingID)
                         Button("Transcribe…", systemImage: "waveform") {
                             transcription = TranscriptionSelection(ids: [note.id])
-                        }.disabled(["recording", "transcribing"].contains(note.status))
+                        }.disabled(note.hasUnfinishedOperation)
                         Button("Delete", systemImage: "trash", role: .destructive) { requestDelete([note.id]) }
-                            .disabled(["recording", "transcribing"].contains(note.status))
+                            .disabled(note.hasUnfinishedOperation)
                     }
                     .swipeActions {
                         Button("Delete", role: .destructive) { requestDelete([note.id]) }
-                            .disabled(["recording", "transcribing"].contains(note.status))
+                            .disabled(note.hasUnfinishedOperation)
                     }
                 }
             }
@@ -124,7 +124,7 @@ struct NotesView: View {
                             Spacer()
                             Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(selection) }
                         }.disabled(selection.isEmpty || selectionBusy)
-                        if selectionBusy { Text("Wait for active recordings and transcriptions to finish.").font(.caption) }
+                        if selectionBusy { Text("Wait for active recordings and transcriptions to finish. Open an unfinished note to recover it.").font(.caption) }
                     } else {
                         if store.preparing { ProgressView("Preparing microphone") }
                         if let note = store.recording {
@@ -153,7 +153,7 @@ struct NotesView: View {
                 Button("Cancel", role: .cancel) { }
                 Button("Save") {
                     if let renaming {
-                        do { try library.rename(renaming, to: draftTitle) } catch { store.error = error.localizedDescription }
+                        do { try library.rename(renaming, to: draftTitle, activeRecordingID: store.recording?.id) } catch { store.error = error.localizedDescription }
                     }
                 }
             }
@@ -180,13 +180,14 @@ struct NoteView: View {
     @State private var draftTitle = ""
     @State private var error: String?
     private var note: RecordingRecord? { library.notes.first { $0.id == id } }
+    private var isActive: Bool { id == store.recording?.id || id == library.transcribingID }
     var body: some View {
         if let note {
             List {
                 Section {
                     Button { draftTitle = note.title ?? note.generatedTitle ?? ""; renaming = true } label: {
                         HStack { Text(note.displayTitle).font(.headline).foregroundStyle(.primary); Spacer(); Image(systemName: "pencil") }
-                    }.accessibilityLabel("Rename note")
+                    }.accessibilityLabel("Rename note").disabled(note.hasUnfinishedOperation && !isActive)
                     Text(timestamp(note)).foregroundStyle(.secondary)
                     if let location = note.location {
                         Link(destination: URL(string: "https://maps.apple.com/?ll=\(location.latitude),\(location.longitude)")!) {
@@ -202,13 +203,19 @@ struct NoteView: View {
                     ShareLink("Share audio", item: library.archive.audioURL(note))
                 }
                 Section {
-                    NoteContent(library: library, id: id, canEdit: !["recording", "transcribing"].contains(note.status), editingChanged: { _ in })
+                    NoteContent(library: library, id: id, canEdit: !note.hasUnfinishedOperation, editingChanged: { _ in })
                 }
                 Section {
+                    if note.hasUnfinishedOperation && !isActive {
+                        RecoverNoteButton {
+                            do { try store.recover(id); error = nil }
+                            catch { self.error = error.localizedDescription }
+                        }
+                    }
                     Button(note.transcriptionActionTitle) { transcribing = true }
-                        .disabled(["recording", "transcribing"].contains(note.status))
+                        .disabled(note.hasUnfinishedOperation)
                 }
-                Section { Button("Delete note", role: .destructive) { deleting = true }.disabled(["recording", "transcribing"].contains(note.status)) }
+                Section { Button("Delete note", role: .destructive) { deleting = true }.disabled(note.hasUnfinishedOperation) }
                 if let error = error ?? store.error { Text(error).foregroundStyle(.red) }
             }
             .navigationTitle("Voice note").navigationBarTitleDisplayMode(.inline)
@@ -216,7 +223,7 @@ struct NoteView: View {
             .alert("Rename note", isPresented: $renaming) {
                 TextField("Title", text: $draftTitle)
                 Button("Cancel", role: .cancel) { }
-                Button("Save") { do { try library.rename(note, to: draftTitle) } catch { self.error = error.localizedDescription } }
+                Button("Save") { do { try library.rename(note, to: draftTitle, activeRecordingID: store.recording?.id) } catch { self.error = error.localizedDescription } }
             }
             .alert("Delete this note?", isPresented: $deleting) {
                 Button("Cancel", role: .cancel) { }

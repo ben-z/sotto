@@ -84,3 +84,20 @@ public struct NoteContent: View {
         }
     }
 }
+
+public struct RecoverNoteButton: View {
+    private let action: () -> Void
+    @State private var confirming = false
+
+    public init(action: @escaping () -> Void) { self.action = action }
+
+    public var body: some View {
+        Button("Recover note…") { confirming = true }
+            .alert("Recover this note?", isPresented: $confirming) {
+                Button("Cancel", role: .cancel) { }
+                Button("Recover note", action: action)
+            } message: {
+                Text("This recording or transcription may still be running on another device. Stop it there and let its files sync before recovering. Saved audio and text are kept.")
+            }
+    }
+}

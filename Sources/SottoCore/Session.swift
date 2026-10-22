@@ -12,7 +12,10 @@ public final class Session: ObservableObject {
     public let configuration: Configuration
     public let archive: Archive
     private let recorder = Recorder()
-    public var activeRecordingID: String? { record?.id }
+    public var activeRecordingID: String? {
+        state == .recording || state == .transcribing ? record?.id : nil
+    }
+    public var retainedRecordingID: String? { record?.id }
     private var record: RecordingRecord?
     private var upload: Task<TranscriptionResult, Error>?
     private var deadline: Task<Void, Never>?
@@ -35,7 +38,7 @@ public final class Session: ObservableObject {
         self.state = state; self.message = message; onChange?()
     }
 
-    public func fail(_ error: Error) { change(.error, error.localizedDescription) }
+    private func fail(_ error: Error) { change(.error, error.localizedDescription) }
 
     public func begin() async {
         guard state == .idle || state == .error else { return }
