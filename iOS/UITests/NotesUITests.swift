@@ -149,7 +149,9 @@ final class NotesUITests: XCTestCase {
         shortcuts.tabBars.buttons["Shortcuts"].tap()
         let back = shortcuts.navigationBars.buttons["Shortcuts"]
         if back.exists { back.tap() }
-        shortcuts.buttons["Sotto"].tap()
+        let sotto = shortcuts.buttons["Sotto"]
+        XCTAssertTrue(sotto.waitForExistence(timeout: 10), shortcuts.debugDescription)
+        sotto.tap()
         for round in 0..<3 {
             app.terminate()
             shortcuts.activate()
