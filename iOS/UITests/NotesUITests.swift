@@ -4,12 +4,15 @@ import XCTest
 final class NotesUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         let feedback = app.staticTexts["error-summary"]
-        // XCTest can report controls covered by the fixed error footer as hittable.
-        if !element.isHittable || (feedback.exists && element.frame.maxY > feedback.frame.minY) {
+        let record = app.buttons["record-note"]
+        // XCTest can report controls covered by a fixed footer as hittable.
+        if !element.isHittable || (feedback.exists && element.frame.maxY > feedback.frame.minY)
+            || (record.exists && element.frame.maxY > record.frame.minY) {
             app.swipeUp()
         }
         XCTAssertTrue(element.isHittable)
         if feedback.exists { XCTAssertLessThanOrEqual(element.frame.maxY, feedback.frame.minY) }
+        if record.exists { XCTAssertLessThanOrEqual(element.frame.maxY, record.frame.minY) }
     }
 
     private func deleteNote(_ row: XCUIElement, in app: XCUIApplication) {
