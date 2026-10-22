@@ -214,8 +214,11 @@ public final class NoteLibrary: ObservableObject {
     }
 
     private func editableNotes(_ ids: Set<String>) throws -> [RecordingRecord] {
-        let selected = notes.filter { ids.contains($0.id) }
-        guard selected.count == ids.count else { throw SottoError("Some selected notes are no longer available.") }
+        let cached = notes.filter { ids.contains($0.id) }
+        guard cached.count == ids.count else { throw SottoError("Some selected notes are no longer available.") }
+        let selected = try cached.map {
+            try Self.readRecord(archive.directory.appendingPathComponent("\($0.id).json"))
+        }
         guard !selected.contains(where: { $0.hasUnfinishedOperation || $0.id == transcribingID }) else {
             throw SottoError("Wait for active recordings and transcriptions to finish. Recover unfinished notes before changing them.")
         }
@@ -223,9 +226,10 @@ public final class NoteLibrary: ObservableObject {
     }
 
     private func editableMetadataNote(_ id: String, activeRecordingID: String?) throws -> RecordingRecord {
-        guard let note = notes.first(where: { $0.id == id }) else {
+        guard notes.contains(where: { $0.id == id }) else {
             throw SottoError("This note is no longer available.")
         }
+        let note = try Self.readRecord(archive.directory.appendingPathComponent("\(id).json"))
         guard !note.hasUnfinishedOperation || id == activeRecordingID || id == transcribingID else {
             throw SottoError("Recover this unfinished note before changing it.")
         }
@@ -286,6 +290,15 @@ public final class NoteLibrary: ObservableObject {
         try save(note)
     }
 
+    private func transcriptionNote(matching request: RecordingRecord, status: String) throws -> RecordingRecord {
+        let note = try Self.readRecord(archive.directory.appendingPathComponent("\(request.id).json"))
+        guard note.status == status, note.model == request.model, note.language == request.language,
+              note.prompt == request.prompt, note.contextTerms == request.contextTerms else {
+            throw SottoError("This note's transcription state changed. Refresh your notes before trying again.")
+        }
+        return note
+    }
+
     /// Each queued request is attempted once. Failed attempts require explicit selection.
     public func process(ids: Set<String>? = nil, key: () throws -> String,
                         transcribe: (URL, String, RecordingRecord) async throws -> TranscriptionResult) async {
@@ -294,8 +307,10 @@ public final class NoteLibrary: ObservableObject {
         while let candidate = notes.reversed().first(where: { $0.status == "queued" && (ids == nil || ids!.contains($0.id)) }) {
             if Task.isCancelled { return }
             // Output files can change even if the final metadata write fails.
-            defer { invalidateText() }
-            var note = candidate
+            defer { transcribingID = nil; invalidateText() }
+            var note: RecordingRecord
+            do { note = try transcriptionNote(matching: candidate, status: "queued") }
+            catch { issue = error.localizedDescription; return }
             var completed = false
             do {
                 let secret = try key()
@@ -304,8 +319,11 @@ public final class NoteLibrary: ObservableObject {
                 transcribingID = note.id
                 let result = try await transcribe(archive.audioURL(note), secret, note)
                 // Persist a returned result even if cancellation arrived with it.
-                // Preserve metadata edits made while the upload was running.
-                note = notes.first { $0.id == candidate.id } ?? note
+                do { note = try transcriptionNote(matching: candidate, status: "transcribing") }
+                catch {
+                    issue = "The transcription could not be saved: \(error.localizedDescription)"
+                    return
+                }
                 try archive.complete(&note, with: result)
                 completed = true
                 log.notice("Note \(note.id, privacy: .public): complete")
@@ -316,18 +334,20 @@ public final class NoteLibrary: ObservableObject {
             } catch {
                 if completed {
                     issue = "Transcription was saved, but the note list could not refresh: \(error.localizedDescription)"
-                    transcribingID = nil
                     return
                 }
-                note = notes.first { $0.id == candidate.id } ?? note
-                note.status = "failed"
-                note.error = Task.isCancelled ? "Transcription was cancelled. Retry when ready." : error.localizedDescription
-                do { try save(note) } catch { issue = "Could not save transcription status: \(error.localizedDescription)" }
-                if !Task.isCancelled && issue == nil { issue = note.error }
-                transcribingID = nil
+                let originalError = error.localizedDescription
+                do {
+                    note = try transcriptionNote(matching: candidate, status: transcribingID == candidate.id ? "transcribing" : "queued")
+                    note.status = "failed"
+                    note.error = Task.isCancelled ? "Transcription was cancelled. Retry when ready." : originalError
+                    try save(note)
+                    if !Task.isCancelled { issue = originalError }
+                } catch {
+                    issue = "\(originalError) · Could not save transcription status: \(error.localizedDescription)"
+                }
                 return
             }
-            transcribingID = nil
         }
     }
 }

@@ -101,7 +101,8 @@ private func unfinishedFixture(_ archive: Archive, status: String) throws -> Rec
     }
     #expect(library.notes[0].status == "recording")
     #expect(try Data(contentsOf: metadata) == Data("{".utf8))
-    #expect(throws: SottoError.self) { try library.delete([note.id]) }
+    #expect(throws: NoteLoadFailure.self) { try library.delete([note.id]) }
+    #expect(try Data(contentsOf: metadata) == Data("{".utf8))
 }
 
 @MainActor @Test func recoveryValidatesCurrentMetadataIdentity() throws {
