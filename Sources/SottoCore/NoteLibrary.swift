@@ -32,19 +32,20 @@ public final class NoteLibrary: ObservableObject {
     }
 
     /// Publish each validated saved note without changing its files, preserving live changes.
-    public func loadHistory(progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
+    public func loadHistory(activeRecordingID: String?, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
         guard historyChanges == nil else { throw SottoError("Note history is already loading.") }
-        historyChanges = Set(notes.map(\.id))
+        historyChanges = Set([activeRecordingID, transcribingID].compactMap { $0 })
         defer { historyChanges = nil }
         let archive = archive
         let task = Task.detached {
             let files = try Self.metadataFiles(archive: archive)
+            let ids = Set(files.map { $0.deletingPathExtension().lastPathComponent })
             await progress(.reading(loaded: 0, total: files.count))
             for (index, url) in files.enumerated() {
                 try Task.checkCancellation()
                 let id = url.deletingPathExtension().lastPathComponent
                 do {
-                    let note = try Self.readRecord(url, archive: archive)
+                    let note = try Self.readRecord(url)
                     try Task.checkCancellation()
                     await self.publishHistory(note)
                 } catch {
@@ -54,11 +55,14 @@ public final class NoteLibrary: ObservableObject {
                 }
                 await progress(.reading(loaded: index + 1, total: files.count))
             }
+            try Task.checkCancellation()
+            return ids
         }
-        try await withTaskCancellationHandler {
+        let ids = try await withTaskCancellationHandler {
             try await task.value
         } onCancel: { task.cancel() }
         try Task.checkCancellation()
+        notes.removeAll { !ids.contains($0.id) && historyChanges?.contains($0.id) == false }
     }
 
     private func deletedDuringHistoryLoad(_ id: String) -> Bool {
@@ -67,8 +71,10 @@ public final class NoteLibrary: ObservableObject {
 
     private func publishHistory(_ note: RecordingRecord) {
         guard historyChanges?.contains(note.id) == false else { return }
-        let index = notes.firstIndex { $0.startedAt < note.startedAt } ?? notes.endIndex
-        notes.insert(note, at: index)
+        var updated = notes.filter { $0.id != note.id }
+        let index = updated.firstIndex { $0.startedAt < note.startedAt } ?? updated.endIndex
+        updated.insert(note, at: index)
+        notes = updated
     }
 
     /// Recovery is an explicit action after stopping the operation on every device.
@@ -80,7 +86,7 @@ public final class NoteLibrary: ObservableObject {
             throw SottoError("Stop this recording or transcription before recovering the note.")
         }
         let url = archive.directory.appendingPathComponent("\(id).json")
-        var note = try Self.readRecord(url, archive: archive)
+        var note = try Self.readRecord(url)
         guard note.hasUnfinishedOperation else {
             historyChanges?.insert(id)
             notes[index] = note
@@ -99,7 +105,7 @@ public final class NoteLibrary: ObservableObject {
         do { archive = try await Task.detached { try Archive(directory: directory) }.value }
         catch { throw NoteLoadFailure(operation: .openFolder, url: directory, underlying: error) }
         let library = NoteLibrary(archive: archive)
-        try await library.loadHistory(progress: progress)
+        try await library.loadHistory(activeRecordingID: nil, progress: progress)
         return library
     }
 
@@ -111,15 +117,14 @@ public final class NoteLibrary: ObservableObject {
         } catch { throw NoteLoadFailure(operation: .openFolder, url: archive.directory, underlying: error) }
     }
 
-    nonisolated private static func readRecord(_ url: URL, archive: Archive) throws -> RecordingRecord {
+    nonisolated private static func readRecord(_ url: URL) throws -> RecordingRecord {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        var note: RecordingRecord
+        let note: RecordingRecord
         do {
             note = try decoder.decode(RecordingRecord.self, from: Data(contentsOf: url))
             guard note.id == url.deletingPathExtension().lastPathComponent,
                   note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata") }
         } catch { throw NoteLoadFailure(operation: .readNote, url: url, underlying: error) }
-        try loadMissingTitle(for: &note, archive: archive)
         return note
     }
 
@@ -134,7 +139,7 @@ public final class NoteLibrary: ObservableObject {
     }
 
     nonisolated private static func readRecords(archive: Archive) throws -> [RecordingRecord] {
-        try metadataFiles(archive: archive).map { try readRecord($0, archive: archive) }
+        try metadataFiles(archive: archive).map { try readRecord($0) }
             .sorted { $0.startedAt > $1.startedAt }
     }
 

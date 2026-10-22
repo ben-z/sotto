@@ -100,6 +100,7 @@ struct NotesView: View {
                     Section { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
                 }
             }
+            .refreshable { await store.loadLibrary() }
             .environment(\.editMode, $editMode)
             .navigationTitle("Notes")
             .toolbar {
