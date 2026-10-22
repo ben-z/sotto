@@ -79,8 +79,7 @@ final class Agent: NSObject, NSApplicationDelegate {
             updates.configure(automatic: session.configuration.automaticUpdateChecks)
             // Healthy launches stay in the menu bar.
             if GroqKeychain.storageStatus() != .stored || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized || (session.configuration.paste && !AXIsProcessTrusted()) {
-                editConfig()
-                settingsWindow?.present(showStatus: true)
+                presentSettings(showStatus: true, error: nil)
             }
         } catch {
             fputs("Sotto startup failed: \(error.localizedDescription)\n", stderr)
@@ -126,7 +125,7 @@ final class Agent: NSObject, NSApplicationDelegate {
             }
             pasteTarget = NSWorkspace.shared.frontmostApplication
             Task { await session.begin() }
-        } catch { session.fail(error) }
+        } catch { reportError(error) }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -142,7 +141,7 @@ final class Agent: NSObject, NSApplicationDelegate {
 
     @objc private func copyLastTranscript() {
         do { try copyToClipboard(session.lastTranscript) }
-        catch { session.fail(error) }
+        catch { reportError(error) }
     }
 
     @objc func cancel() { Task { await session.cancel() } }
@@ -153,16 +152,25 @@ final class Agent: NSObject, NSApplicationDelegate {
             }
             recordingsWindow?.refresh()
             recordingsWindow?.present()
-        } catch { session.fail(error) }
+        } catch { reportError(error) }
     }
     @objc func editConfig() {
+        let message = session.state == .error ? session.message : nil
+        presentSettings(showStatus: message != nil, error: message)
+    }
+    private func reportError(_ error: Error) {
+        AppLog.shared.record(error.localizedDescription, error: true)
+        NSSound.beep()
+        presentSettings(showStatus: true, error: error.localizedDescription)
+    }
+    private func presentSettings(showStatus: Bool, error: String?) {
         if settingsWindow == nil {
             settingsWindow = SettingsWindow(configuration: session.configuration, configurationURL: Paths.config, updates: updates, onSave: { [weak self] config in
                 guard let self else { throw SottoError("Sotto is shutting down.") }
                 try self.applyConfiguration(config)
             }, onClose: { [weak self] in self?.settingsWindow = nil })
         }
-        settingsWindow?.present(showStatus: session.state == .error, error: session.state == .error ? session.message : nil)
+        settingsWindow?.present(showStatus: showStatus, error: error)
     }
     private func applyConfiguration(_ config: Configuration) throws {
         guard recordingsWindow?.busy != true, session.state == .idle || session.state == .error else {
@@ -245,7 +253,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         catch { AppLog.shared.record("Cannot save status: \(error.localizedDescription)", error: true) }
         if session.state == .error {
             NSSound.beep()
-            if session.activeRecordingID != nil { openRecordings() }
+            if session.retainedRecordingID != nil { openRecordings() }
             else { editConfig() }
         }
     }

@@ -40,3 +40,10 @@ for suffix in ("a", "b"):
     (library / f"{identifier}.json").write_text(json.dumps(record))
     (library / f"{identifier}.txt").write_text(text)
     (library / f"{identifier}.response.json").write_text(json.dumps({"text": text}))
+
+identifier = "ios-recovery-fixture"
+record = json.loads((library / "ios-ui-fixture.json").read_text())
+record.update(id=identifier, title="Unfinished fixture", status="recording", audioFile=f"{identifier}.m4a")
+shutil.copyfile(fixture, library / record["audioFile"])
+(library / f"{identifier}.json").write_text(json.dumps(record))
+(library / f"{identifier}.md").write_text("Retained recovery text.")

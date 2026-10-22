@@ -3,7 +3,8 @@ import SottoCore
 
 public struct RecordingSummary: View {
     public let note: RecordingRecord
-    public init(note: RecordingRecord) { self.note = note }
+    public let isActive: Bool
+    public init(note: RecordingRecord, isActive: Bool) { self.note = note; self.isActive = isActive }
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(note.displayTitle).font(.headline).lineLimit(2)
@@ -20,8 +21,8 @@ public struct RecordingSummary: View {
     }
     private var status: String {
         switch note.status {
-        case "recording": "Recording"
-        case "transcribing": "Transcribing"
+        case "recording": isActive ? "Recording" : "Unfinished recording"
+        case "transcribing": isActive ? "Transcribing" : "Unfinished transcription"
         case "queued": "Audio saved"
         case "complete": "Transcribed"
         case "interrupted": "Recording interrupted"

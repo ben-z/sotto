@@ -26,7 +26,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(saved.status == "recording")
 }
 
-@MainActor @Test func notesRecoverDurableQueueAndInterruptedRecording() throws {
+@MainActor @Test func unfinishedOperationsRequireExplicitRecoveryAfterRelaunch() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let library = try NoteLibrary(directory: directory)
@@ -34,6 +34,15 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     queued.status = "transcribing"; try library.save(queued)
     let interrupted = try library.create(model: "whisper-large-v3", language: nil)
     let restored = try NoteLibrary(directory: directory)
+    #expect(restored.notes.first { $0.id == queued.id }?.status == "transcribing")
+    #expect(restored.notes.first { $0.id == interrupted.id }?.status == "recording")
+    for note in [queued, interrupted] {
+        #expect(throws: SottoError.self) { try restored.delete([note.id]) }
+        #expect(throws: SottoError.self) { try restored.transcribe([note.id], model: "fixture", language: nil) }
+        #expect(throws: SottoError.self) { try restored.rename(note, to: "Changed", activeRecordingID: nil) }
+        #expect(throws: SottoError.self) { try restored.saveText("Changed", for: note) }
+        try restored.recover(note.id, activeRecordingID: nil)
+    }
     #expect(restored.notes.first { $0.id == queued.id }?.status == "failed")
     #expect(restored.notes.first { $0.id == interrupted.id }?.status == "interrupted")
     #expect(try Data(contentsOf: restored.archive.audioURL(queued)) == Data([1, 2, 3]))
@@ -77,7 +86,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
         uploaded.append(note.id)
         if note.id == first.id {
             _ = try queuedNote(library)
-            try library.rename(note, to: "Ideas")
+            try library.rename(note, to: "Ideas", activeRecordingID: nil)
             try library.saveText("My edited note", for: note)
         }
         return TranscriptionResult(text: "Original transcript", rawResponse: Data("{}".utf8), milliseconds: 10, requestID: nil)
@@ -129,7 +138,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     let library = try NoteLibrary(directory: directory)
     let recording = try library.create(model: "whisper-large-v3-turbo", language: "en")
     try Data([1, 2, 3]).write(to: library.archive.audioURL(recording))
-    try library.rename(recording, to: "A thought while recording")
+    try library.rename(recording, to: "A thought while recording", activeRecordingID: recording.id)
     try library.queue(recording, duration: 5)
     #expect(library.notes.first?.title == "A thought while recording")
     #expect(library.notes.first?.durationSeconds == 5)
@@ -194,7 +203,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
         TranscriptionResult(text: "Planning the next garden project", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
     }
     #expect(library.notes[0].displayTitle == "Planning the next garden project")
-    try library.rename(note, to: "Garden")
+    try library.rename(note, to: "Garden", activeRecordingID: nil)
     try library.saveText("My own notes", for: note)
     try library.transcribe([note.id], model: "whisper-large-v3", language: nil)
     #expect(library.notes[0].transcribedModel == "whisper-large-v3-turbo")
@@ -207,7 +216,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(restored.notes[0].displayTitle == "Garden")
     #expect(restored.notes[0].transcribedModel == "whisper-large-v3")
     #expect(try restored.text(for: note) == "My own notes")
-    try restored.rename(note, to: " ")
+    try restored.rename(note, to: " ", activeRecordingID: nil)
     #expect(restored.notes[0].displayTitle == "A better transcript")
     #expect(try String(contentsOf: directory.appendingPathComponent("\(note.id).txt"), encoding: .utf8) == "A better transcript")
 }
@@ -327,15 +336,20 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(library.notes.first { $0.id == second.id }?.status == "complete")
 }
 
-@MainActor @Test func historyRecoveryPreservesActiveRecording() throws {
+@MainActor @Test func explicitRecoveryRejectsActiveRecordingAndSessionUpload() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let library = try NoteLibrary(directory: directory)
-    let stale = try library.create(model: "whisper-large-v3", language: "en")
-    let active = try library.create(model: "whisper-large-v3", language: "en")
-    try library.reload(recover: true, excluding: [active.id])
-    #expect(library.notes.first { $0.id == active.id }?.status == "recording")
-    #expect(library.notes.first { $0.id == stale.id }?.status == "interrupted")
+    var active = try library.create(model: "whisper-large-v3", language: "en")
+    for status in ["recording", "transcribing"] {
+        active.status = status
+        try library.save(active)
+        let metadata = directory.appendingPathComponent("\(active.id).json")
+        let original = try Data(contentsOf: metadata)
+        #expect(throws: SottoError.self) { try library.recover(active.id, activeRecordingID: active.id) }
+        #expect(library.notes.first?.status == status)
+        #expect(try Data(contentsOf: metadata) == original)
+    }
 }
 
 @MainActor @Test func asynchronousHistoryReadsExistingArchive() async throws {
@@ -355,7 +369,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     defer { try? FileManager.default.removeItem(at: directory) }
     let library = try NoteLibrary(directory: directory)
     let note = try queuedNote(library)
-    try library.rename(note, to: "My title")
+    try library.rename(note, to: "My title", activeRecordingID: nil)
     try library.saveText("My edits", for: note)
     let audio = try Data(contentsOf: library.archive.audioURL(note))
     await library.process(ids: [note.id], key: { "fixture" }) { _, _, _ in

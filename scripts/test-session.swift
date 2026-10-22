@@ -21,6 +21,28 @@ struct GroqClient {
         return TranscriptionResult(text: "Deadline transcript", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
     }
 }
+@MainActor private func checkCancellationWriteFailure() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try Session(configuration: Configuration(recordingsDirectory: root.path))
+    await session.begin()
+    guard session.state == .recording, let id = session.activeRecordingID else {
+        throw SottoError("The cancellation fixture did not start recording")
+    }
+    let metadata = root.appendingPathComponent("\(id).json")
+    let original = try Data(contentsOf: metadata)
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: root.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path) }
+    await session.cancel()
+    guard session.state == .error, session.activeRecordingID == nil, session.retainedRecordingID == id else {
+        throw SottoError("A stopped recording remained active after its cancelled status could not be saved")
+    }
+    guard try Data(contentsOf: metadata) == original,
+          try Data(contentsOf: root.appendingPathComponent("\(id).m4a")) == Data([1]) else {
+        throw SottoError("Cancellation write failure changed the retained recording")
+    }
+}
+
 @main struct SessionTests {
     @MainActor static func main() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -35,6 +57,7 @@ struct GroqClient {
         guard session.state == .idle, session.lastTranscript == "Deadline transcript", delivered == "Deadline transcript" else {
             throw SottoError("Automatic stop discarded a successful transcription")
         }
+        try await checkCancellationWriteFailure()
         let transcripts = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "txt" }
         guard transcripts.count == 1,
