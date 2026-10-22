@@ -195,6 +195,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
             deadline = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(maximumSeconds), tolerance: .zero) }
                 catch { return }
+                guard !Task.isCancelled else { return }
                 self?.finish(recordingError: nil)
             }
         } catch {
