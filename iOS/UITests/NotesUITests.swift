@@ -4,8 +4,12 @@ import XCTest
 final class NotesUITests: XCTestCase {
     private func deleteNote(_ row: XCUIElement, in app: XCUIApplication) {
         let id = row.identifier
+        XCTAssertTrue(row.isHittable, "The note must be visible before opening it for deletion")
         row.tap()
-        app.buttons["Delete note"].tap()
+        app.swipeUp()
+        let delete = app.buttons["Delete note"]
+        XCTAssertTrue(delete.isHittable)
+        delete.tap()
         app.buttons["Delete permanently"].tap()
         XCTAssertFalse(app.buttons[id].exists)
     }
@@ -18,12 +22,22 @@ final class NotesUITests: XCTestCase {
         corrupt.tap()
         let transcript = app.staticTexts["Original fixture transcript."]
         XCTAssertTrue(transcript.waitForExistence(timeout: 5))
+        let playbackError = app.staticTexts["error-summary"]
+        XCTAssertFalse(playbackError.exists)
         app.buttons["Play recording"].tap()
-        app.swipeUp()
-        let playbackError = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "OSStatus")).firstMatch
-        XCTAssertTrue(playbackError.waitForExistence(timeout: 5), "Corrupt audio must report its decoder error: \(app.debugDescription)")
+        XCTAssertTrue(playbackError.waitForExistence(timeout: 5), "Corrupt audio must report its decoder error")
+        XCTAssertTrue(playbackError.isHittable, "Playback errors must be visible without scrolling")
+        let message = playbackError.label
+        XCTAssertFalse(message.isEmpty)
         XCTAssertFalse(app.buttons["Stop playback"].exists)
         XCTAssertTrue(app.buttons["Play recording"].isEnabled)
+        app.buttons["Details"].tap()
+        let details = app.alerts["Error details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertTrue(details.staticTexts[message].isHittable, "Details must show the complete playback error")
+        details.buttons["Copy details"].tap()
+        XCTAssertFalse(details.exists)
+        XCTAssertTrue(playbackError.isHittable)
         let failure = XCTAttachment(screenshot: app.screenshot())
         failure.name = "Corrupt audio playback failure"; failure.lifetime = .keepAlways; add(failure)
         app.navigationBars.buttons["Notes"].tap()
@@ -145,6 +159,7 @@ final class NotesUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Details copied"].exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Library read failure details"; attachment.lifetime = .keepAlways; add(attachment)
+        app.buttons["Technical details"].tap()
         deleteNote(saved, in: app)
     }
 

@@ -50,6 +50,24 @@ private struct HistoryStatus: View {
     }
 }
 
+private struct ErrorBanner: View {
+    let message: String
+    @State private var showingDetails = false
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Text(message).font(.callout).foregroundStyle(.red).lineLimit(2)
+                .accessibilityIdentifier("error-summary")
+            Spacer()
+            Button("Details") { showingDetails = true }
+        }
+        .alert("Error details", isPresented: $showingDetails, presenting: message) { message in
+            Button("Copy details") { UIPasteboard.general.string = message }
+            Button("OK", role: .cancel) { }
+        } message: { Text($0) }
+    }
+}
+
 struct NotesView: View {
     @ObservedObject var store: NotesStore
     @ObservedObject var library: NoteLibrary
@@ -62,7 +80,6 @@ struct NotesView: View {
     @State private var renaming: RecordingRecord?
     @State private var renameShown = false
     @State private var draftTitle = ""
-    @State private var showingErrorDetails = false
     private var selectionBusy: Bool {
         library.notes.contains { selection.contains($0.id) && ["recording", "transcribing"].contains($0.status) }
     }
@@ -111,11 +128,7 @@ struct NotesView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
                     if let error = store.error ?? library.issue {
-                        HStack(alignment: .top) {
-                            Text(error).font(.callout).foregroundStyle(.red).lineLimit(2)
-                            Spacer()
-                            Button("Details") { showingErrorDetails = true }
-                        }
+                        ErrorBanner(message: error)
                     }
                     if editMode.isEditing {
                         Text("\(selection.count) selected").font(.caption).foregroundStyle(.secondary)
@@ -144,10 +157,6 @@ struct NotesView: View {
             }
             .sheet(isPresented: $settings) { SettingsView(store: store) }
             .sheet(item: $transcription) { TranscribeSheet(store: store, ids: $0.ids) }
-            .alert("Error details", isPresented: $showingErrorDetails, presenting: store.error ?? library.issue) { message in
-                Button("Copy details") { UIPasteboard.general.string = message }
-                Button("OK", role: .cancel) { }
-            } message: { Text($0) }
             .alert("Rename note", isPresented: $renameShown) {
                 TextField("Title", text: $draftTitle)
                 Button("Cancel", role: .cancel) { }
@@ -209,9 +218,13 @@ struct NoteView: View {
                         .disabled(["recording", "transcribing"].contains(note.status))
                 }
                 Section { Button("Delete note", role: .destructive) { deleting = true }.disabled(["recording", "transcribing"].contains(note.status)) }
-                if let error = error ?? store.error { Text(error).foregroundStyle(.red) }
             }
             .navigationTitle("Voice note").navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                if let error = error ?? store.error {
+                    ErrorBanner(message: error).padding().background(.bar)
+                }
+            }
             .onDisappear { store.stopPlayback() }
             .alert("Rename note", isPresented: $renaming) {
                 TextField("Title", text: $draftTitle)
@@ -290,7 +303,7 @@ struct SettingsView: View {
                             do {
                                 try await verifyKey(candidate)
                                 try GroqKeychain.save(candidate); key = ""; store.refreshKey()
-                                keyResult = .success("Key verified and saved. Queued recordings will transcribe automatically.")
+                                keyResult = .success("Key verified and saved. Open a recording and select Transcribe.")
                             } catch { keyResult = .failure(error) }
                         }
                     }.disabled(checking || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
