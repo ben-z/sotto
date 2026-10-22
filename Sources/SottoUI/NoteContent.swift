@@ -15,7 +15,7 @@ private struct NoteFiles: Sendable {
 
 private struct LoadedText<Value> {
     let request: TextRequest
-    let result: Result<Value, Error>
+    let value: Value
 }
 
 /// Both apps expose the edited note and the latest machine output through these controls.
@@ -30,7 +30,7 @@ public struct NoteContent: View {
     @State private var error: String?
     @State private var transcriptExpanded = false
     @State private var noteContent: LoadedText<NoteFiles>?
-    @State private var transcript: LoadedText<String>?
+    @State private var transcript: LoadedText<Result<String, Error>>?
 
     public init(library: NoteLibrary, id: String, canEdit: Bool, editingChanged: @escaping (Bool) -> Void) {
         self.library = library; self.id = id; self.canEdit = canEdit; self.editingChanged = editingChanged
@@ -39,15 +39,11 @@ public struct NoteContent: View {
     public var body: some View {
         if let note = library.notes.first(where: { $0.id == id }) {
             let request = TextRequest(id: id, revision: library.textRevision, status: note.status)
-            let files = loadedFiles(for: request)
+            let files = noteContent?.request == request ? noteContent?.value : nil
             VStack(alignment: .leading, spacing: 14) {
                 Text("Note").font(.headline)
-                if let noteContent, noteContent.request == request {
-                    switch noteContent.result {
-                    case .success(let files): noteText(files.text)
-                    case .failure(let error): readError(error).accessibilityIdentifier("note-text-read-error")
-                    }
-                } else { ProgressView("Loading note…") }
+                if let files { noteText(files.text) }
+                else { ProgressView("Loading note…") }
                 if let message = note.error { Text(message).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
                 if note.transcribedModel != nil || note.status == "complete" || files?.hasTranscript == true {
                     Divider()
@@ -56,7 +52,7 @@ public struct NoteContent: View {
                         if transcriptExpanded {
                             VStack(alignment: .leading, spacing: 12) {
                                 if let transcript, transcript.request == request {
-                                    switch transcript.result {
+                                    switch transcript.value {
                                     case .success(let text):
                                         Text(text).textSelection(.enabled)
                                         ShareLink("Share transcript", item: text)
@@ -127,14 +123,6 @@ public struct NoteContent: View {
         Text(error.localizedDescription).foregroundStyle(.red).textSelection(.enabled)
     }
 
-    private func loadedFiles(for request: TextRequest) -> NoteFiles? {
-        guard let noteContent, noteContent.request == request else { return nil }
-        switch noteContent.result {
-        case .success(let files): return files
-        case .failure: return nil
-        }
-    }
-
     private func currentRequest() -> TextRequest? {
         guard let note = library.notes.first(where: { $0.id == id }) else { return nil }
         return TextRequest(id: id, revision: library.textRevision, status: note.status)
@@ -142,28 +130,26 @@ public struct NoteContent: View {
 
     private func loadNote(_ note: RecordingRecord, request: TextRequest) async {
         let library = library
-        let result = await read {
+        let files = await read {
             let text = Result { try library.text(for: note) }
-            try Task.checkCancellation()
+            guard !Task.isCancelled else { return nil as NoteFiles? }
             return NoteFiles(text: text, hasEdits: library.hasEditedText(for: note), hasTranscript: library.hasMachineTranscript(for: note))
         }
-        guard !Task.isCancelled, currentRequest() == request else { return }
-        noteContent = LoadedText(request: request, result: result)
+        guard let files, !Task.isCancelled, currentRequest() == request else { return }
+        noteContent = LoadedText(request: request, value: files)
     }
 
     private func loadTranscript(_ note: RecordingRecord, request: TextRequest) async {
         let library = library
-        let result = await read { try library.machineTranscript(for: note) }
-        guard !Task.isCancelled, transcriptExpanded, currentRequest() == request else { return }
-        transcript = LoadedText(request: request, result: result)
+        let result = await read { Result { try library.machineTranscript(for: note) } }
+        guard let result, !Task.isCancelled, transcriptExpanded, currentRequest() == request else { return }
+        transcript = LoadedText(request: request, value: result)
     }
 
-    private func read<Value: Sendable>(_ operation: @escaping @Sendable () throws -> Value) async -> Result<Value, Error> {
+    private func read<Value: Sendable>(_ operation: @escaping @Sendable () -> Value?) async -> Value? {
         let worker = Task.detached {
-            Result {
-                try Task.checkCancellation()
-                return try operation()
-            }
+            guard !Task.isCancelled else { return nil as Value? }
+            return operation()
         }
         return await withTaskCancellationHandler {
             await worker.value
