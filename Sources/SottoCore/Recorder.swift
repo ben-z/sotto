@@ -46,11 +46,17 @@ public final class Recorder: NSObject, AVAudioRecorderDelegate {
     }
 
     nonisolated public func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        Task { @MainActor in self.onUnexpectedStop?(flag ? nil : "Audio recording ended unsuccessfully.") }
+        Task { @MainActor in
+            guard self.recorder === recorder else { return }
+            self.onUnexpectedStop?(flag ? nil : "Audio recording ended unsuccessfully.")
+        }
     }
 
     nonisolated public func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: (any Error)?) {
         let message = error?.localizedDescription ?? "Audio encoder failed."
-        Task { @MainActor in self.onUnexpectedStop?(message) }
+        Task { @MainActor in
+            guard self.recorder === recorder else { return }
+            self.onUnexpectedStop?(message)
+        }
     }
 }

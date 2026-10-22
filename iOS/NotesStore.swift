@@ -338,12 +338,16 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func stopPlayback() {
         guard player != nil else { return }
+        player?.delegate = nil
         player?.stop(); player = nil; playingID = nil
         do { try AVAudioSession.sharedInstance().setActive(false) } catch { self.error = error.localizedDescription }
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        // Retain the non-Sendable source across dispatch; the handler only compares its identity.
+        nonisolated(unsafe) let source = player
         Task { @MainActor in
+            guard self.player === source else { return }
             self.stopPlayback()
             if !flag { self.error = "Playback stopped unexpectedly. The original audio is retained." }
         }
