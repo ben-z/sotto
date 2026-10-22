@@ -303,7 +303,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     #expect(library.notes[0].status == "queued")
 }
 
-@MainActor @Test func finalizationWriteFailureLeavesStoppedNoteEditable() throws {
+@MainActor @Test func finalizationWriteFailureRetainsAudioWithoutRecreatingMissingMetadata() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let library = try NoteLibrary(directory: directory)
@@ -318,6 +318,11 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     } catch { #expect(error.localizedDescription.contains("Could not save interrupted status")) }
     #expect(library.notes[0].status == "interrupted")
     try FileManager.default.removeItem(at: metadata)
+    #expect(throws: NoteLoadFailure.self) { try library.transcribe([note.id], model: "fixture", language: "en") }
+    #expect(!FileManager.default.fileExists(atPath: metadata.path))
+    #expect(library.notes[0].status == "interrupted")
+    #expect(try Data(contentsOf: library.archive.audioURL(note)) == Data([1, 2, 3]))
+    try library.archive.save(library.notes[0])
     try library.transcribe([note.id], model: "fixture", language: "en")
     #expect(try NoteLibrary(directory: directory).notes[0].status == "queued")
 }

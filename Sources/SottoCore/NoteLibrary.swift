@@ -214,8 +214,11 @@ public final class NoteLibrary: ObservableObject {
     }
 
     private func editableNotes(_ ids: Set<String>) throws -> [RecordingRecord] {
-        let selected = notes.filter { ids.contains($0.id) }
-        guard selected.count == ids.count else { throw SottoError("Some selected notes are no longer available.") }
+        let cached = notes.filter { ids.contains($0.id) }
+        guard cached.count == ids.count else { throw SottoError("Some selected notes are no longer available.") }
+        let selected = try cached.map {
+            try Self.readRecord(archive.directory.appendingPathComponent("\($0.id).json"))
+        }
         guard !selected.contains(where: { $0.hasUnfinishedOperation || $0.id == transcribingID }) else {
             throw SottoError("Wait for active recordings and transcriptions to finish. Recover unfinished notes before changing them.")
         }
@@ -223,9 +226,10 @@ public final class NoteLibrary: ObservableObject {
     }
 
     private func editableMetadataNote(_ id: String, activeRecordingID: String?) throws -> RecordingRecord {
-        guard let note = notes.first(where: { $0.id == id }) else {
+        guard notes.contains(where: { $0.id == id }) else {
             throw SottoError("This note is no longer available.")
         }
+        let note = try Self.readRecord(archive.directory.appendingPathComponent("\(id).json"))
         guard !note.hasUnfinishedOperation || id == activeRecordingID || id == transcribingID else {
             throw SottoError("Recover this unfinished note before changing it.")
         }
