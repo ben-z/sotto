@@ -22,7 +22,7 @@ Dates include a timezone. New recordings retain the timezone where they were sta
 
 ## Storage and privacy
 
-The default library is **Files → On My iPhone → Sotto → Recordings**. Settings lets you choose another library folder; existing notes remain in their original folder. Every note has AAC audio and JSON metadata. Completed transcriptions add the original `.txt` transcript and Groq `.response.json`; editing creates a separate `.md` file. Original audio and machine output are retained. Back up the folder before deleting Sotto.
+The default library is **Files → On My iPhone → Sotto → Recordings**. Settings lets you choose another library folder; existing notes remain in their original folder. New recordings use AAC audio and JSON metadata. Audio imported with the Mac CLI keeps its original format. Completed transcriptions add the original `.txt` transcript and Groq `.response.json`; editing creates a separate `.md` file. Original audio and machine output are retained. Back up the folder before deleting Sotto.
 
 The Groq key is stored in the device’s Keychain. Transcription sends the recording to Groq using that key. Local-first describes storage and queueing; transcription itself requires the network.
 
