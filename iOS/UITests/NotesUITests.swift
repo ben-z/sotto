@@ -10,6 +10,31 @@ final class NotesUITests: XCTestCase {
         XCTAssertFalse(app.buttons[id].exists)
     }
 
+    func testMicrophoneDenialStaysVisibleWithLongHistory() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let record = app.buttons["record-note"]
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        XCTAssertTrue(record.isHittable)
+        XCTAssertFalse(app.buttons["note-ios-feedback-fixture-00"].isHittable)
+        record.tap()
+        let message = "Allow microphone access in iPhone Settings → Sotto to record a note."
+        let feedback = app.staticTexts[message]
+        XCTAssertTrue(feedback.waitForExistence(timeout: 10))
+        XCTAssertTrue(feedback.isHittable, "Recording errors must stay visible beside the Record button")
+        XCTAssertTrue(record.isHittable)
+        XCTAssertFalse(app.buttons["Stop recording"].exists)
+        app.buttons["Details"].tap()
+        let details = app.alerts["Error details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertTrue(details.staticTexts[message].isHittable)
+        details.buttons["OK"].tap()
+        XCTAssertTrue(record.isHittable)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Microphone denial with long history"; attachment.lifetime = .keepAlways; add(attachment)
+        app.terminate()
+    }
+
     func testRecordingShortcutStartsAfterColdLaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
