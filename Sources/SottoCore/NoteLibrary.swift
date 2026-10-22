@@ -113,7 +113,7 @@ public final class NoteLibrary: ObservableObject {
             guard note.id == url.deletingPathExtension().lastPathComponent,
                   note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata") }
         } catch { throw NoteLoadFailure(operation: .readNote, url: url, underlying: error) }
-        if note.generatedTitle == nil && note.status == "complete" {
+        if (note.title == nil || note.title == "") && note.generatedTitle == nil && note.status == "complete" {
             let transcript = archive.directory.appendingPathComponent("\(note.id).txt")
             if FileManager.default.fileExists(atPath: transcript.path) {
                 do { note.generatedTitle = RecordingRecord.suggestedTitle(from: try String(contentsOf: transcript, encoding: .utf8)) }

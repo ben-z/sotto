@@ -206,17 +206,23 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)
-    var note = try fixture(archive, id: "a", status: "complete")
-    note.generatedTitle = "Saved title"
-    try archive.save(note)
-    for ext in ["m4a", "txt", "md"] {
-        try FileManager.default.createDirectory(at: directory.appendingPathComponent("a.\(ext)"), withIntermediateDirectories: false)
+    var generated = try fixture(archive, id: "a", status: "complete")
+    generated.generatedTitle = "Saved title"
+    var renamed = try fixture(archive, id: "b", status: "complete")
+    renamed.title = "Custom title"
+    for note in [generated, renamed] {
+        try archive.save(note)
+        for ext in ["m4a", "txt", "md"] {
+            try FileManager.default.createDirectory(at: directory.appendingPathComponent("\(note.id).\(ext)"), withIntermediateDirectories: false)
+        }
     }
     try Data("not metadata".utf8).write(to: directory.appendingPathComponent("a.response.json"))
     let library = NoteLibrary(archive: archive)
     try await library.loadHistory { _ in }
-    #expect(library.notes.first?.displayTitle == "Saved title")
-    #expect(throws: (any Error).self) { try library.text(for: note) }
+    #expect(Set(library.notes.map(\.displayTitle)) == ["Saved title", "Custom title"])
+    for note in [generated, renamed] {
+        #expect(throws: (any Error).self) { try library.text(for: note) }
+    }
 }
 
 @MainActor @Test func corruptHistoryDoesNotDiscardNewRecording() async throws {
