@@ -113,14 +113,18 @@ public final class NoteLibrary: ObservableObject {
             guard note.id == url.deletingPathExtension().lastPathComponent,
                   note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata") }
         } catch { throw NoteLoadFailure(operation: .readNote, url: url, underlying: error) }
-        if note.generatedTitle == nil && note.status == "complete" {
+        try loadMissingTitle(for: &note, archive: archive)
+        return note
+    }
+
+    nonisolated private static func loadMissingTitle(for note: inout RecordingRecord, archive: Archive) throws {
+        if (note.title == nil || note.title == "") && note.generatedTitle == nil && note.status == "complete" {
             let transcript = archive.directory.appendingPathComponent("\(note.id).txt")
             if FileManager.default.fileExists(atPath: transcript.path) {
                 do { note.generatedTitle = RecordingRecord.suggestedTitle(from: try String(contentsOf: transcript, encoding: .utf8)) }
                 catch { throw NoteLoadFailure(operation: .readNote, url: transcript, underlying: error) }
             }
         }
-        return note
     }
 
     nonisolated private static func readRecords(archive: Archive) throws -> [RecordingRecord] {
@@ -258,6 +262,7 @@ public final class NoteLibrary: ObservableObject {
     public func rename(_ note: RecordingRecord, to title: String) throws {
         var note = notes.first { $0.id == note.id } ?? note
         note.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        try Self.loadMissingTitle(for: &note, archive: archive)
         try save(note)
     }
 
