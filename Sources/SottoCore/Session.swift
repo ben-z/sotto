@@ -23,8 +23,11 @@ public final class Session: ObservableObject {
         self.configuration = configuration
         archive = try Archive(directory: configuration.recordingsURL)
         recorder.onUnexpectedStop = { [weak self] error in
-            guard let self, self.state == .recording else { return }
-            Task { await self.finish(recordingError: error) }
+            guard let self, self.state == .recording, let id = self.record?.id else { return }
+            Task {
+                guard self.record?.id == id else { return }
+                await self.finish(recordingError: error)
+            }
         }
     }
 
