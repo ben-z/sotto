@@ -62,6 +62,7 @@ struct NotesView: View {
     @State private var renaming: RecordingRecord?
     @State private var renameShown = false
     @State private var draftTitle = ""
+    @State private var showingErrorDetails = false
     private var selectionBusy: Bool {
         library.notes.contains { selection.contains($0.id) && $0.hasUnfinishedOperation }
     }
@@ -96,9 +97,6 @@ struct NotesView: View {
                             .disabled(note.hasUnfinishedOperation)
                     }
                 }
-                if let error = store.error ?? library.issue {
-                    Section { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-                }
             }
             .environment(\.editMode, $editMode)
             .navigationTitle("Notes")
@@ -112,6 +110,13 @@ struct NotesView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
+                    if let error = store.error ?? library.issue {
+                        HStack(alignment: .top) {
+                            Text(error).font(.callout).foregroundStyle(.red).lineLimit(2)
+                            Spacer()
+                            Button("Details") { showingErrorDetails = true }
+                        }
+                    }
                     if editMode.isEditing {
                         Text("\(selection.count) selected").font(.caption).foregroundStyle(.secondary)
                         HStack {
@@ -139,6 +144,10 @@ struct NotesView: View {
             }
             .sheet(isPresented: $settings) { SettingsView(store: store) }
             .sheet(item: $transcription) { TranscribeSheet(store: store, ids: $0.ids) }
+            .alert("Error details", isPresented: $showingErrorDetails, presenting: store.error ?? library.issue) { message in
+                Button("Copy details") { UIPasteboard.general.string = message }
+                Button("OK", role: .cancel) { }
+            } message: { Text($0) }
             .alert("Rename note", isPresented: $renameShown) {
                 TextField("Title", text: $draftTitle)
                 Button("Cancel", role: .cancel) { }
