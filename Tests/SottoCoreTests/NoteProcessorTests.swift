@@ -27,6 +27,9 @@ private func changeProcessorMetadata(_ scenario: String, note: RecordingRecord, 
     switch scenario {
     case "wrong-id": current.id = "another-note"
     case "wrong-audio": current.audioFile = "another-note.m4a"
+    case "audio":
+        current.audioFile = "\(note.id).wav"
+        try Data("Different audio".utf8).write(to: archive.audioURL(current))
     case "model": current.model = "another-model"
     case "language": current.language = "fr"
     case "prompt": current.prompt = "Changed prompt"
@@ -37,7 +40,7 @@ private func changeProcessorMetadata(_ scenario: String, note: RecordingRecord, 
 }
 
 @MainActor @Test func processorMetadataRejectsChangedQueueBeforeReadingKeyOrUploading() async throws {
-    for scenario in ["deleted", "invalid", "wrong-id", "wrong-audio", "recording", "transcribing", "complete", "model", "language", "prompt", "terms"] {
+    for scenario in ["deleted", "invalid", "wrong-id", "wrong-audio", "audio", "recording", "transcribing", "complete", "model", "language", "prompt", "terms"] {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try! FileManager.default.removeItem(at: directory) }
         let (library, note) = try processorFixture(directory)
@@ -92,7 +95,7 @@ private func changeProcessorMetadata(_ scenario: String, note: RecordingRecord, 
 }
 
 @MainActor @Test func processorMetadataRejectsCompletionConflictsWithoutChangingFiles() async throws {
-    for scenario in ["deleted", "invalid", "wrong-id", "wrong-audio", "recording", "complete", "queued", "model", "language", "prompt", "terms"] {
+    for scenario in ["deleted", "invalid", "wrong-id", "wrong-audio", "audio", "recording", "complete", "queued", "model", "language", "prompt", "terms"] {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try! FileManager.default.removeItem(at: directory) }
         let (library, note) = try processorFixture(directory)
@@ -111,7 +114,7 @@ private func changeProcessorMetadata(_ scenario: String, note: RecordingRecord, 
 }
 
 @MainActor @Test func processorMetadataDoesNotOverwriteFailureConflictsAndKeepsOriginalError() async throws {
-    for scenario in ["deleted", "invalid", "wrong-id", "wrong-audio", "recording", "complete", "queued", "model", "language", "prompt", "terms"] {
+    for scenario in ["deleted", "invalid", "wrong-id", "wrong-audio", "audio", "recording", "complete", "queued", "model", "language", "prompt", "terms"] {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try! FileManager.default.removeItem(at: directory) }
         let (library, _) = try processorFixture(directory)

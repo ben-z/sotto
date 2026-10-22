@@ -48,6 +48,7 @@ public struct RecordingLocation: Codable, Sendable {
 }
 
 public struct Archive: Sendable {
+    public static let supportedAudioExtensions: Set<String> = ["m4a", "wav", "mp3", "flac", "ogg", "webm", "mp4"]
     public let directory: URL
 
     public init(directory: URL) throws {
