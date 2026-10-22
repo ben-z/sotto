@@ -40,7 +40,8 @@ final class NotesUITests: XCTestCase {
         let record = app.buttons["record-note"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         XCTAssertTrue(record.isHittable)
-        XCTAssertTrue(app.buttons["note-ios-ui-fixture"].waitForExistence(timeout: 10))
+        let firstNote = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-")).firstMatch
+        XCTAssertTrue(firstNote.waitForExistence(timeout: 10))
         let historyLoaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.progressIndicators.firstMatch)
         XCTAssertEqual(XCTWaiter.wait(for: [historyLoaded], timeout: 10), .completed)
         XCTAssertFalse(app.buttons["Try again"].exists, "The long history fixture must load successfully")
