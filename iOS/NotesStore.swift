@@ -278,9 +278,9 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         guard let request = locationRequests.removeValue(forKey: requestID) else { return }
         request.manager.delegate = nil
         locationMessage = message
-        guard let library, var note = library.notes.first(where: { $0.id == request.noteID }) else { return }
-        note.location = location; note.locationStatus = message
-        do { try library.save(note) } catch { self.error = "Cannot save location: \(error.localizedDescription)" }
+        guard let library else { return }
+        do { try library.updateLocation(location, message: message, for: request.noteID, activeRecordingID: recording?.id) }
+        catch { self.error = "Cannot save location: \(error.localizedDescription)" }
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

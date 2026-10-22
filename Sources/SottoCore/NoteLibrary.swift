@@ -294,6 +294,14 @@ public final class NoteLibrary: ObservableObject {
         try save(note)
     }
 
+    /// A location request may finish after recording stops or the note is deleted locally.
+    public func updateLocation(_ location: RecordingLocation?, message: String?, for id: String, activeRecordingID: String?) throws {
+        guard notes.contains(where: { $0.id == id }) else { return }
+        var note = try editableMetadataNote(id, activeRecordingID: activeRecordingID)
+        note.location = location; note.locationStatus = message
+        try save(note)
+    }
+
     private func transcriptionNote(matching request: RecordingRecord, status: String) throws -> RecordingRecord {
         let note = try Self.readRecord(archive.directory.appendingPathComponent("\(request.id).json"))
         guard note.status == status, note.audioFile == request.audioFile,
