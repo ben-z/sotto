@@ -51,6 +51,35 @@ final class NotesUITests: XCTestCase {
         deleteNote(playable, in: app)
     }
 
+    func testMicrophoneDenialStaysVisibleWithLongHistory() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let record = app.buttons["record-note"]
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        XCTAssertTrue(record.isHittable)
+        XCTAssertTrue(app.buttons["note-ios-ui-fixture"].waitForExistence(timeout: 10))
+        let historyLoaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.progressIndicators.firstMatch)
+        XCTAssertEqual(XCTWaiter.wait(for: [historyLoaded], timeout: 10), .completed)
+        XCTAssertFalse(app.buttons["Try again"].exists, "The long history fixture must load successfully")
+        XCTAssertFalse(app.buttons["note-ios-feedback-fixture-00"].isHittable)
+        record.tap()
+        let message = "Allow microphone access in iPhone Settings → Sotto to record a note."
+        let feedback = app.staticTexts[message]
+        XCTAssertTrue(feedback.waitForExistence(timeout: 10))
+        XCTAssertTrue(feedback.isHittable, "Recording errors must stay visible beside the Record button")
+        XCTAssertTrue(record.isHittable)
+        XCTAssertFalse(app.buttons["Stop recording"].exists)
+        app.buttons["Details"].tap()
+        let details = app.alerts["Error details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertTrue(details.staticTexts[message].isHittable)
+        details.buttons["OK"].tap()
+        XCTAssertTrue(record.isHittable)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Microphone denial with long history"; attachment.lifetime = .keepAlways; add(attachment)
+        app.terminate()
+    }
+
     func testRecordingShortcutStartsAfterColdLaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
