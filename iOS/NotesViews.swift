@@ -15,6 +15,41 @@ private struct TranscriptionSelection: Identifiable {
     var id: String { ids.sorted().joined(separator: ",") }
 }
 
+private struct HistoryStatus: View {
+    @ObservedObject var store: NotesStore
+    @State private var copiedDetails = false
+
+    var body: some View {
+        switch store.libraryState {
+        case .loading(let progress):
+            Section {
+                switch progress {
+                case .opening: ProgressView("Opening notes…")
+                case .reading(let loaded, let total):
+                    ProgressView(value: Double(loaded), total: Double(max(total, 1)))
+                    Text("\(loaded) of \(total) notes loaded").foregroundStyle(.secondary)
+                }
+            } header: { Text("Loading earlier notes") }
+        case .failed(let failure, let progress):
+            Section {
+                Text("Some earlier notes could not be loaded. You can still record.")
+                if case .reading(let loaded, let total) = progress {
+                    Text("\(loaded) of \(total) notes loaded").foregroundStyle(.secondary)
+                }
+                Button("Try again") { copiedDetails = false; Task { await store.loadLibrary() } }
+                DisclosureGroup("Technical details") {
+                    Text(failure.technicalDetails).font(.caption).textSelection(.enabled)
+                    Button(copiedDetails ? "Details copied" : "Copy details") {
+                        UIPasteboard.general.string = failure.technicalDetails
+                        copiedDetails = true
+                    }
+                }
+            } header: { Text("Couldn’t load earlier notes") }
+        case .idle, .ready: EmptyView()
+        }
+    }
+}
+
 struct NotesView: View {
     @ObservedObject var store: NotesStore
     @ObservedObject var library: NoteLibrary
@@ -33,7 +68,8 @@ struct NotesView: View {
     var body: some View {
         NavigationStack {
             List(selection: $selection) {
-                if library.notes.isEmpty {
+                HistoryStatus(store: store)
+                if library.notes.isEmpty, case .ready = store.libraryState {
                     ContentUnavailableView("Your voice notes", systemImage: "waveform", description: Text("Record audio, then turn it into text with Groq. Original recordings are saved locally."))
                         .listRowBackground(Color.clear)
                 }

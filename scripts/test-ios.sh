@@ -15,12 +15,12 @@ container="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
 python3 scripts/seed-ios-fixture.py "$container"
 result="${SOTTO_IOS_RESULT_PATH:-work/ios-tests-$(date -u +%Y%m%dT%H%M%SZ).xcresult}"
 # A directory with a metadata filename produces a real read error.
-unreadableFixture="$container/Documents/Recordings/zzz-unreadable.json"
+unreadableFixture="$container/Documents/Recordings/000-unreadable.json"
 mkdir "$unreadableFixture"
 removeUnreadableFixture() {
   local currentContainer
   currentContainer="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
-  rmdir "$currentContainer/Documents/Recordings/zzz-unreadable.json"
+  rmdir "$currentContainer/Documents/Recordings/000-unreadable.json"
 }
 cleanup() {
   if [[ "$unreadablePending" == true ]]; then removeUnreadableFixture; fi
@@ -30,7 +30,7 @@ unreadablePending=true
 trap cleanup EXIT
 xcodebuild "${build[@]}" "${testOptions[@]}" \
   -resultBundlePath "${result%.xcresult}-opening-failure.xcresult" \
-  -only-testing:SottoUITests/NotesUITests/testUnreadableNoteStopsLoading test-without-building
+  -only-testing:SottoUITests/NotesUITests/testUnreadableNoteDoesNotBlockRecording test-without-building
 removeUnreadableFixture
 unreadablePending=false
 # Each location check gets a fresh fix before launching its app.
@@ -40,8 +40,16 @@ for locationTest in testBackToBackRecordingsKeepTheirLocations testRecordEditAnd
     -resultBundlePath "${result%.xcresult}-$locationTest.xcresult" \
     "-only-testing:SottoUITests/NotesUITests/$locationTest" test-without-building
 done
+# The real one-minute recording plus settings and relaunch checks need their own budget.
+recordingLimitAllowance=180
+xcodebuild "${build[@]}" -test-timeouts-enabled YES \
+  -default-test-execution-time-allowance "$recordingLimitAllowance" \
+  -maximum-test-execution-time-allowance "$recordingLimitAllowance" \
+  -resultBundlePath "${result%.xcresult}-recording-limit.xcresult" \
+  -only-testing:SottoUITests/NotesUITests/testRecordingLimitPersistsAndStopsAtCapturedDeadline test-without-building
 xcodebuild "${build[@]}" "${testOptions[@]}" \
-  -skip-testing:SottoUITests/NotesUITests/testUnreadableNoteStopsLoading \
+  -skip-testing:SottoUITests/NotesUITests/testUnreadableNoteDoesNotBlockRecording \
   -skip-testing:SottoUITests/NotesUITests/testBackToBackRecordingsKeepTheirLocations \
   -skip-testing:SottoUITests/NotesUITests/testRecordEditAndRecoverWithoutKey \
+  -skip-testing:SottoUITests/NotesUITests/testRecordingLimitPersistsAndStopsAtCapturedDeadline \
   -resultBundlePath "$result" test-without-building

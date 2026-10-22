@@ -3,7 +3,6 @@ import Foundation
 public enum NoteLoadProgress: Equatable, Sendable {
     case opening
     case reading(loaded: Int, total: Int)
-    case recovering(recovered: Int, total: Int)
 }
 
 public struct NoteLoadFailure: LocalizedError, Sendable {

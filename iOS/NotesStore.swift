@@ -10,20 +10,18 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     static let shared = NotesStore()
     enum LibraryState {
         case idle
-        case loading(NoteLoadProgress, since: Date)
+        case loading(NoteLoadProgress)
         case failed(NoteLoadFailure, progress: NoteLoadProgress)
-        case ready(NoteLibrary)
+        case ready
     }
     @Published private(set) var libraryState: LibraryState = .idle
-    var library: NoteLibrary? {
-        if case .ready(let library) = libraryState { return library }
-        return nil
-    }
+    @Published private(set) var library: NoteLibrary?
     var openingLibrary: Bool {
         if case .loading = libraryState { return true }
         return false
     }
     private var openingTask: Task<Void, Never>?
+    private var historyTask: Task<Void, Never>?
     private var selectedFolder: URL?
     private var folder: NotesFolder?
     @Published var recording: RecordingRecord?
@@ -81,43 +79,64 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     }
 
     func loadLibrary() async {
-        guard library == nil else { return }
-        await startOpening().value
+        if library == nil { await startOpening().value }
+        else { startHistoryLoading() }
     }
 
     private func startOpening() -> Task<Void, Never> {
         if let openingTask { return openingTask }
-        libraryState = .loading(.opening, since: Date())
+        libraryState = .loading(.opening)
         log.notice("Opening notes")
         let selectedFolder = selectedFolder
         let bookmarkURL = bookmarkURL
         let task = Task {
             defer { openingTask = nil }
-            var progress = NoteLoadProgress.opening
             do {
                 let destination = try await Task.detached {
                     try NotesFolder(selected: selectedFolder, bookmarkURL: bookmarkURL)
                 }.value
-                let library = try await NoteLibrary.open(directory: destination.url) { update in
-                    progress = update
-                    self.libraryState = .loading(update, since: Date())
-                }
+                let archive: Archive
+                do { archive = try await Task.detached { try Archive(directory: destination.url) }.value }
+                catch { throw NoteLoadFailure(operation: .openFolder, url: destination.url, underlying: error) }
                 if selectedFolder != nil {
                     try await Task.detached { try destination.saveBookmark(to: bookmarkURL) }.value
                 }
                 folder = destination
-                libraryState = .ready(library)
-                log.notice("Opened \(library.notes.count) notes")
+                library = NoteLibrary(archive: archive)
+                startHistoryLoading()
             } catch {
                 let failure: NoteLoadFailure
                 if let reported = error as? NoteLoadFailure { failure = reported }
                 else { failure = NoteLoadFailure(operation: .openFolder, url: bookmarkURL, underlying: error) }
                 log.error("Opening notes failed: \(failure.technicalDetails, privacy: .public)")
-                libraryState = .failed(failure, progress: progress)
+                libraryState = .failed(failure, progress: .opening)
             }
         }
         openingTask = task
         return task
+    }
+
+    private func startHistoryLoading() {
+        guard historyTask == nil, let library else { return }
+        libraryState = .loading(.reading(loaded: 0, total: 0))
+        historyTask = Task {
+            defer { historyTask = nil }
+            var progress = NoteLoadProgress.reading(loaded: 0, total: 0)
+            do {
+                try await library.loadHistory { update in
+                    progress = update
+                    self.libraryState = .loading(update)
+                }
+                libraryState = .ready
+                log.notice("Opened \(library.notes.count) notes")
+            } catch {
+                let failure: NoteLoadFailure
+                if let reported = error as? NoteLoadFailure { failure = reported }
+                else { failure = NoteLoadFailure(operation: .openFolder, url: library.archive.directory, underlying: error) }
+                log.error("Opening notes failed: \(failure.technicalDetails, privacy: .public)")
+                libraryState = .failed(failure, progress: progress)
+            }
+        }
     }
 
     @objc nonisolated private func audioInterrupted(_ notification: Notification) {
@@ -211,12 +230,13 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     }
 
     func selectFolder(_ url: URL) throws {
-        guard !openingLibrary else { throw SottoError("Wait for the notes folder to finish opening.") }
+        guard !openingLibrary, historyTask == nil else { throw SottoError("Wait for the notes folder to finish opening.") }
         guard recording == nil, !preparing, worker == nil else { throw SottoError("Finish recording and transcription before changing folders.") }
         guard locationRequests.isEmpty else { throw SottoError("Wait for recording location capture to finish before changing folders.") }
         error = nil
         stopPlayback()
         selectedFolder = url
+        library = nil
         _ = startOpening()
     }
 

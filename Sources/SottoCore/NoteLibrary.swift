@@ -10,6 +10,8 @@ public final class NoteLibrary: ObservableObject {
     @Published public private(set) var issue: String?
     public let archive: Archive
     private let log = Logger(subsystem: "dev.sotto.notes", category: "queue")
+    // Live edits and deletions take precedence over the history snapshot.
+    private var historyChanges: Set<String>?
 
     public init(archive: Archive) { self.archive = archive }
 
@@ -30,6 +32,52 @@ public final class NoteLibrary: ObservableObject {
         }.value
     }
 
+    /// Publish each saved note after validating and recovering it, preserving live changes.
+    public func loadHistory(progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
+        guard historyChanges == nil else { throw SottoError("Note history is already loading.") }
+        historyChanges = Set(notes.map(\.id))
+        defer { historyChanges = nil }
+        let archive = archive
+        let task = Task.detached {
+            let files = try Self.metadataFiles(archive: archive)
+            await progress(.reading(loaded: 0, total: files.count))
+            for (index, url) in files.enumerated() {
+                try Task.checkCancellation()
+                let id = url.deletingPathExtension().lastPathComponent
+                do {
+                    var note = try Self.readRecord(url, archive: archive)
+                    if await self.historyChanges?.contains(id) == false {
+                        if note.status == "recording" || note.status == "transcribing" {
+                            try Task.checkCancellation()
+                            note = try Self.recover(note, archive: archive)
+                        }
+                        try Task.checkCancellation()
+                        await self.publishHistory(note)
+                    }
+                } catch {
+                    try Task.checkCancellation()
+                    // A note deleted through this library can disappear during its read.
+                    guard await self.deletedDuringHistoryLoad(id) else { throw error }
+                }
+                await progress(.reading(loaded: index + 1, total: files.count))
+            }
+        }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+        try Task.checkCancellation()
+    }
+
+    private func deletedDuringHistoryLoad(_ id: String) -> Bool {
+        historyChanges?.contains(id) == true && !notes.contains { $0.id == id }
+    }
+
+    private func publishHistory(_ note: RecordingRecord) {
+        guard historyChanges?.contains(note.id) == false else { return }
+        let index = notes.firstIndex { $0.startedAt < note.startedAt } ?? notes.endIndex
+        notes.insert(note, at: index)
+    }
+
     public func recoverInterrupted(excluding activeIDs: Set<String>) throws {
         for index in notes.indices where !activeIDs.contains(notes[index].id) {
             if notes[index].status == "recording" || notes[index].status == "transcribing" {
@@ -40,38 +88,12 @@ public final class NoteLibrary: ObservableObject {
 
     /// Publish a library only after every metadata read and recovery write succeeds.
     public static func open(directory: URL, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws -> NoteLibrary {
-        let task = Task.detached {
-            try Task.checkCancellation()
-            await progress(.opening)
-            let archive: Archive
-            do { archive = try Archive(directory: directory) }
-            catch { throw NoteLoadFailure(operation: .openFolder, url: directory, underlying: error) }
-            let files = try metadataFiles(archive: archive)
-            var records: [RecordingRecord] = []
-            await progress(.reading(loaded: 0, total: files.count))
-            for url in files {
-                try Task.checkCancellation()
-                records.append(try readRecord(url, archive: archive))
-                await progress(.reading(loaded: records.count, total: files.count))
-            }
-            let interrupted = records.indices.filter { records[$0].status == "recording" || records[$0].status == "transcribing" }
-            if !interrupted.isEmpty {
-                await progress(.recovering(recovered: 0, total: interrupted.count))
-                for (completed, index) in interrupted.enumerated() {
-                    try Task.checkCancellation()
-                    records[index] = try recover(records[index], archive: archive)
-                    await progress(.recovering(recovered: completed + 1, total: interrupted.count))
-                }
-            }
-            try Task.checkCancellation()
-            return (archive, records.sorted { $0.startedAt > $1.startedAt })
-        }
-        let (archive, records) = try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: { task.cancel() }
-        try Task.checkCancellation()
+        progress(.opening)
+        let archive: Archive
+        do { archive = try await Task.detached { try Archive(directory: directory) }.value }
+        catch { throw NoteLoadFailure(operation: .openFolder, url: directory, underlying: error) }
         let library = NoteLibrary(archive: archive)
-        library.notes = records
+        try await library.loadHistory(progress: progress)
         return library
     }
 
@@ -79,7 +101,7 @@ public final class NoteLibrary: ObservableObject {
         do {
             return try FileManager.default.contentsOfDirectory(at: archive.directory, includingPropertiesForKeys: nil)
                 .filter { $0.pathExtension == "json" && !$0.lastPathComponent.hasSuffix(".response.json") }
-                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
         } catch { throw NoteLoadFailure(operation: .openFolder, url: archive.directory, underlying: error) }
     }
 
@@ -117,6 +139,7 @@ public final class NoteLibrary: ObservableObject {
 
     public func create(model: String, language: String?) throws -> RecordingRecord {
         let note = try archive.newRecord(model: model, language: language, prompt: "", contextTerms: [])
+        historyChanges?.insert(note.id)
         notes.append(note)
         notes.sort { $0.startedAt > $1.startedAt }
         return note
@@ -124,6 +147,7 @@ public final class NoteLibrary: ObservableObject {
 
     public func save(_ note: RecordingRecord) throws {
         try archive.save(note)
+        historyChanges?.insert(note.id)
         log.notice("Note \(note.id, privacy: .public): \(note.status, privacy: .public)")
         if let index = notes.firstIndex(where: { $0.id == note.id }) { notes[index] = note }
         else { notes.append(note); notes.sort { $0.startedAt > $1.startedAt } }
@@ -194,6 +218,7 @@ public final class NoteLibrary: ObservableObject {
                 if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
             }
             notes.removeAll { $0.id == note.id }
+            historyChanges?.insert(note.id)
         }
     }
 
