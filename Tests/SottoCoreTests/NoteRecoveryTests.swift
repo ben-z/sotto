@@ -19,9 +19,11 @@ private func unfinishedFixture(_ archive: Archive, status: String) throws -> Rec
     let library = try NoteLibrary(directory: directory)
     note.title = "Changed on another device"
     try archive.save(note)
+    let revision = library.textRevision
 
     try library.recover(note.id, activeRecordingID: nil)
 
+    #expect(library.textRevision == revision + 1)
     #expect(library.notes[0].status == "interrupted")
     #expect(library.notes[0].title == "Changed on another device")
     #expect(try NoteLibrary(directory: directory).notes[0].status == "interrupted")
@@ -42,9 +44,11 @@ private func unfinishedFixture(_ archive: Archive, status: String) throws -> Rec
     try archive.complete(&note, with: TranscriptionResult(text: "Completed elsewhere", rawResponse: Data("{}".utf8), milliseconds: 2, requestID: "remote"))
     let metadata = directory.appendingPathComponent("\(note.id).json")
     let completed = try Data(contentsOf: metadata)
+    let revision = library.textRevision
 
     #expect(throws: SottoError.self) { try library.recover(note.id, activeRecordingID: nil) }
 
+    #expect(library.textRevision == revision + 1)
     #expect(library.notes[0].status == "complete")
     #expect(library.notes[0].requestID == "remote")
     #expect(library.notes[0].error == nil)
@@ -67,7 +71,9 @@ private func unfinishedFixture(_ archive: Archive, status: String) throws -> Rec
         #expect(library.transcribingID == current.id)
         let metadata = directory.appendingPathComponent("\(current.id).json")
         let original = try Data(contentsOf: metadata)
+        let revision = library.textRevision
         #expect(throws: SottoError.self) { try library.recover(current.id, activeRecordingID: nil) }
+        #expect(library.textRevision == revision)
         #expect(library.notes[0].status == "transcribing")
         #expect(try Data(contentsOf: metadata) == original)
         return TranscriptionResult(text: "Completed locally", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)

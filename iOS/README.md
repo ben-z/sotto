@@ -8,7 +8,9 @@ Language selection in Settings and the transcription sheet includes the full [Wh
 
 ## Working with notes
 
-Tap a note’s title to rename it, or long-press a list row and choose **Rename**. **Edit note** in the Note section edits only the body; title editing stays separate. Untitled notes use a short excerpt from the transcript automatically; this runs locally and makes no extra API request. Clearing a custom title restores the automatic title.
+Tap a note’s title to rename it, or long-press a list row and choose **Rename**. **Edit note** in the Note section edits only the body; title editing stays separate. New transcriptions save a short excerpt as the automatic title. Older notes without a saved title appear as **Voice note**; clearing a custom title derives one from the saved transcript locally.
+
+Pull down on the list to refresh notes added, changed, or deleted in the folder by another device. Notes update as their metadata loads; missing rows are removed after the scan succeeds. Recording remains available during loading. History scans read metadata only; audio and note text are opened when requested.
 
 Note details show the model used for the latest successful transcription. **Retranscribe** lets you choose a model and language for a new attempt. It replaces the machine transcript and raw response, while preserving your edited note text and custom title. Expand **Machine transcript** to read or share the new result separately from your edits. **Replace note with transcript…** replaces edited text after confirmation; later transcriptions update the note until you edit it again. These controls and the model/language picker are shared with the Mac app.
 
@@ -44,7 +46,7 @@ xcrun simctl list devices available
 scripts/test-ios.sh SIMULATOR_UDID
 ```
 
-Use a disposable, booted simulator with microphone input and no Groq key. The script authorizes its microphone permission and seeds a small completed-note fixture. The editor test checks saved-note persistence independently of recording. The rejected-key UI check uses a Debug-simulator-only fixture to verify the displayed error and confirm after relaunch that the key was not saved; it does not contact Groq. Core tests separately verify real HTTP response handling, including 401, 403, 429, and service errors. Release and physical-device builds exclude the fixture. The recording test records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
+Use a disposable, booted simulator with microphone input and no Groq key. The script authorizes its microphone permission and seeds saved-note fixtures. The refresh test checks that pulling down preserves the current recording and visible notes. Core tests separately check external additions, edits, deletions, and concurrent local changes. The editor test checks saved-note persistence independently of recording. The rejected-key UI check uses a Debug-simulator-only fixture to verify the displayed error and confirm after relaunch that the key was not saved; it does not contact Groq. Core tests separately verify real HTTP response handling, including 401, 403, 429, and service errors. Release and physical-device builds exclude the fixture. The recording test records real audio, backgrounds the app, saves without credentials, edits a note, and verifies persistence after relaunch. It must fail if recording cannot start. Core tests exercise queue recovery, offline errors, rejected requests, retained edits, and sequential uploads without requiring a paid service.
 
 ## Architecture
 

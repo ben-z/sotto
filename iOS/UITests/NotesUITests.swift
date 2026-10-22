@@ -2,6 +2,30 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    func testPullToRefreshPreservesRecording() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let existing = app.buttons["note-ios-ui-fixture"]
+        XCTAssertTrue(existing.waitForExistence(timeout: 10))
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !app.progressIndicators.firstMatch.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
+        XCTAssertFalse(app.buttons["Try again"].exists)
+        app.buttons["record-note"].tap()
+        let stop = app.buttons["Stop recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 10))
+        app.collectionViews.firstMatch.swipeDown()
+        let refreshed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !app.progressIndicators.firstMatch.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 10), .completed)
+        XCTAssertTrue(stop.exists, "Refreshing must preserve the current recording")
+        XCTAssertTrue(existing.exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "note-ios-ui-fixture").count, 1)
+        XCTAssertFalse(app.buttons["Try again"].exists)
+        stop.tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10))
+        deleteNote(saved, in: app)
+    }
+
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, inNoteList: Bool) {
         let feedback = app.staticTexts["error-summary"]
         let recordTop = inNoteList ? app.buttons["record-note"].frame.minY : nil
@@ -122,6 +146,10 @@ final class NotesUITests: XCTestCase {
             await MainActor.run { XCUIApplication().terminate() }
         }
         shortcuts.launch()
+        shortcuts.tabBars.buttons["Shortcuts"].tap()
+        let back = shortcuts.navigationBars.buttons["Shortcuts"]
+        if back.exists { back.tap() }
+        shortcuts.buttons["Sotto"].tap()
         for _ in 0..<3 {
             app.terminate()
             shortcuts.activate()
@@ -158,9 +186,7 @@ final class NotesUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(loaded, 3)
         XCTAssertEqual(total, loaded + 1)
         XCTAssertTrue(app.buttons["record-note"].exists)
-        XCTAssertTrue(app.buttons["note-ios-ui-fixture"].exists)
-        XCTAssertTrue(app.buttons["note-ios-delete-fixture-a"].exists)
-        XCTAssertTrue(app.buttons["note-ios-delete-fixture-b"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-ios-")).firstMatch.exists)
         XCTAssertFalse(app.buttons["Choose notes folder"].exists)
         XCTAssertFalse(app.progressIndicators.firstMatch.exists)
         app.buttons["record-note"].tap()
@@ -382,7 +408,7 @@ final class NotesUITests: XCTestCase {
         let fixture = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UI test fixture")).firstMatch
         XCTAssertTrue(fixture.waitForExistence(timeout: 10), "Run scripts/seed-ios-fixture.py before this test")
         fixture.tap()
-        XCTAssertTrue(app.staticTexts["Original fixture transcript."].exists)
+        XCTAssertTrue(app.staticTexts["Original fixture transcript."].waitForExistence(timeout: 5))
         app.buttons["Edit note"].tap()
         let editor = app.textViews["Note text"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
@@ -498,6 +524,7 @@ final class NotesUITests: XCTestCase {
         let app = XCUIApplication(); app.launch()
         let fixture = app.buttons["note-ios-ui-fixture"]
         XCTAssertTrue(fixture.waitForExistence(timeout: 10)); fixture.tap()
+        XCTAssertTrue(app.buttons["Edit note"].waitForExistence(timeout: 5))
         app.buttons["Edit note"].tap()
         let editor = app.textViews["Note text"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5)); editor.tap()
@@ -505,11 +532,13 @@ final class NotesUITests: XCTestCase {
         app.buttons["Save"].tap()
         app.swipeUp()
         app.buttons["Machine transcript"].tap()
+        XCTAssertTrue(app.buttons["Replace note with transcript…"].waitForExistence(timeout: 5))
         app.buttons["Replace note with transcript…"].tap()
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Replacement test edit.")).firstMatch.exists)
         app.buttons["Replace note with transcript…"].tap()
         app.buttons["Replace note"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Original fixture transcript.")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Replacement test edit.")).firstMatch.exists)
         XCTAssertFalse(app.buttons["Replace note with transcript…"].exists)
         app.terminate(); app.launch(); fixture.tap()
@@ -545,6 +574,36 @@ final class NotesUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(row.label.contains("Recording interrupted"))
         deleteNote(row, in: app)
+    }
+
+    func testUnreadableEditedTextRemainsUntilExplicitReplacement() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let fixture = app.buttons["note-ios-unreadable-text-fixture"]
+        XCTAssertTrue(fixture.waitForExistence(timeout: 10)); fixture.tap()
+        let error = app.staticTexts["note-text-read-error"]
+        XCTAssertTrue(error.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Edit note"].exists)
+        XCTAssertFalse(app.staticTexts["No note text yet."].exists)
+        app.swipeUp()
+        app.buttons["Machine transcript"].tap()
+        XCTAssertTrue(app.staticTexts["Recoverable machine transcript."].waitForExistence(timeout: 5))
+        let replace = app.buttons["Replace note with transcript…"]
+        XCTAssertTrue(replace.waitForExistence(timeout: 5)); replace.tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(error.exists)
+        app.terminate(); app.launch(); fixture.tap()
+        XCTAssertTrue(error.waitForExistence(timeout: 5))
+        app.swipeUp()
+        app.buttons["Machine transcript"].tap()
+        XCTAssertTrue(replace.waitForExistence(timeout: 5)); replace.tap()
+        app.buttons["Replace note"].tap()
+        app.buttons["Machine transcript"].tap()
+        XCTAssertTrue(app.staticTexts["Recoverable machine transcript."].waitForExistence(timeout: 5))
+        XCTAssertFalse(error.exists)
+        app.terminate(); app.launch(); fixture.tap()
+        XCTAssertTrue(app.staticTexts["Recoverable machine transcript."].waitForExistence(timeout: 5))
+        XCTAssertFalse(error.exists)
     }
 
 }

@@ -80,7 +80,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func loadLibrary() async {
         if library == nil { await startOpening().value }
-        else { startHistoryLoading() }
+        else { await startHistoryLoading().value }
     }
 
     private func startOpening() -> Task<Void, Never> {
@@ -103,7 +103,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
                 }
                 folder = destination
                 library = NoteLibrary(archive: archive)
-                startHistoryLoading()
+                _ = startHistoryLoading()
             } catch {
                 let failure: NoteLoadFailure
                 if let reported = error as? NoteLoadFailure { failure = reported }
@@ -116,14 +116,15 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         return task
     }
 
-    private func startHistoryLoading() {
-        guard historyTask == nil, let library else { return }
+    private func startHistoryLoading() -> Task<Void, Never> {
+        if let historyTask { return historyTask }
+        guard let library else { preconditionFailure("Open the notes folder before loading history.") }
         libraryState = .loading(.reading(loaded: 0, total: 0))
-        historyTask = Task {
-            defer { historyTask = nil }
+        let task = Task {
+            defer { historyTask = nil; library.invalidateText() }
             var progress = NoteLoadProgress.reading(loaded: 0, total: 0)
             do {
-                try await library.loadHistory { update in
+                try await library.loadHistory(activeRecordingID: recording?.id) { update in
                     progress = update
                     self.libraryState = .loading(update)
                 }
@@ -137,6 +138,8 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
                 libraryState = .failed(failure, progress: progress)
             }
         }
+        historyTask = task
+        return task
     }
 
     @objc private func audioInterrupted(_ notification: Notification) {

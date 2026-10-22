@@ -115,6 +115,7 @@ struct NotesView: View {
                     }
                 }
             }
+            .refreshable { await store.loadLibrary() }
             .environment(\.editMode, $editMode)
             .navigationTitle("Notes")
             .toolbar {
@@ -213,6 +214,7 @@ struct NoteView: View {
                 }
                 Section {
                     NoteContent(library: library, id: id, canEdit: !note.hasUnfinishedOperation, editingChanged: { _ in })
+                        .id(id)
                 }
                 Section {
                     if note.hasUnfinishedOperation && !isActive {

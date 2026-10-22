@@ -9,7 +9,6 @@ final class RecordingsWindow: NSWindowController, NSWindowDelegate {
     let library: NoteLibrary
     private let model: RecordingsModel
     private let onClose: () -> Void
-    private var refreshVersion = 0
     var busy: Bool { model.working || model.editing }
 
     init(session: Session, onClose: @escaping () -> Void) throws {
@@ -28,22 +27,7 @@ final class RecordingsWindow: NSWindowController, NSWindowDelegate {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     func present() { showWindow(nil); window?.makeKeyAndOrderFront(nil); NSApp.activate() }
-    func refresh() {
-        refreshVersion += 1
-        if [.preparing, .recording].contains(model.session.state) { model.stop() }
-        guard !model.loading, !model.working else { return }
-        model.loading = true
-        Task {
-            do {
-                var loadedVersion: Int
-                repeat {
-                    loadedVersion = refreshVersion
-                    try await library.reloadAsync()
-                } while loadedVersion != refreshVersion
-            } catch { model.error = error.localizedDescription }
-            model.loading = false
-        }
-    }
+    func refresh() { model.refresh() }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if busy { model.error = "Finish transcription or save or cancel your edits before closing this window."; return false }
         return true
@@ -59,12 +43,36 @@ final class RecordingsModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var error: String?
     @Published var playingID: String?
     @Published var loading = false
-    @Published var working = false
-    @Published var editing = false
+    @Published var working = false {
+        didSet { if !working && needsRefresh { refresh() } }
+    }
+    @Published var editing = false {
+        didSet { if !editing && needsRefresh { refresh() } }
+    }
     private var player: AVAudioPlayer?
     private var worker: Task<Void, Never>?
+    private var needsRefresh = false
     init(library: NoteLibrary, session: Session) { self.library = library; self.session = session }
     var busy: Bool { loading || working || editing || [.preparing, .recording, .transcribing].contains(session.state) }
+    func refresh() {
+        needsRefresh = true
+        if [.preparing, .recording].contains(session.state) { stop() }
+        guard !loading, !working, !editing else { return }
+        loading = true
+        Task {
+            defer { loading = false }
+            do {
+                repeat {
+                    needsRefresh = false
+                    try await library.reloadAsync()
+                    selection.formIntersection(Set(library.notes.map(\.id)))
+                } while needsRefresh
+            } catch {
+                needsRefresh = false
+                self.error = error.localizedDescription
+            }
+        }
+    }
     var selectionIncludesUnfinishedNotes: Bool {
         library.notes.contains { selection.contains($0.id) && $0.hasUnfinishedOperation }
     }
@@ -207,6 +215,7 @@ private struct RecordingDetail: View {
             }
             ScrollView {
                 NoteContent(library: library, id: note.id, canEdit: !model.busy && !note.hasUnfinishedOperation) { model.editing = $0 }
+                    .id(note.id)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
