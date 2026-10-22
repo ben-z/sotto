@@ -129,8 +129,10 @@ public final class NoteLibrary: ObservableObject {
         let note: RecordingRecord
         do {
             note = try decoder.decode(RecordingRecord.self, from: Data(contentsOf: url))
+            let audioExtension = (note.audioFile as NSString).pathExtension
             guard note.id == url.deletingPathExtension().lastPathComponent,
-                  note.audioFile == "\(note.id).m4a" else { throw SottoError("Invalid note metadata") }
+                  Archive.supportedAudioExtensions.contains(audioExtension.lowercased()),
+                  note.audioFile == "\(note.id).\(audioExtension)" else { throw SottoError("Invalid note metadata") }
         } catch { throw NoteLoadFailure(operation: .readNote, url: url, underlying: error) }
         return note
     }
@@ -240,7 +242,9 @@ public final class NoteLibrary: ObservableObject {
         let selected = try editableNotes(ids)
         for note in selected {
             // Metadata goes last so a failed removal remains visible and can be retried.
-            for ext in ["m4a", "txt", "md", "response.json", "json"] {
+            let audio = archive.audioURL(note)
+            if FileManager.default.fileExists(atPath: audio.path) { try FileManager.default.removeItem(at: audio) }
+            for ext in ["txt", "md", "response.json", "json"] {
                 let url = archive.directory.appendingPathComponent("\(note.id).\(ext)")
                 if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
             }
@@ -292,7 +296,8 @@ public final class NoteLibrary: ObservableObject {
 
     private func transcriptionNote(matching request: RecordingRecord, status: String) throws -> RecordingRecord {
         let note = try Self.readRecord(archive.directory.appendingPathComponent("\(request.id).json"))
-        guard note.status == status, note.model == request.model, note.language == request.language,
+        guard note.status == status, note.audioFile == request.audioFile,
+              note.model == request.model, note.language == request.language,
               note.prompt == request.prompt, note.contextTerms == request.contextTerms else {
             throw SottoError("This note's transcription state changed. Refresh your notes before trying again.")
         }

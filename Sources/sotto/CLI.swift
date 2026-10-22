@@ -60,7 +60,7 @@ struct CLI {
                 let key = try GroqKeychain.read()
                 let archive = try Archive(directory: config.recordingsURL)
                 let input = URL(fileURLWithPath: NSString(string: args[1]).expandingTildeInPath)
-                guard ["m4a", "wav", "mp3", "flac", "ogg", "webm", "mp4"].contains(input.pathExtension.lowercased()) else { throw SottoError("Unsupported audio extension.") }
+                guard Archive.supportedAudioExtensions.contains(input.pathExtension.lowercased()) else { throw SottoError("Unsupported audio extension.") }
                 var record = try archive.newRecord(model: config.model, language: config.language, prompt: "", contextTerms: [])
                 record.audioFile = "\(record.id).\(input.pathExtension.lowercased())"
                 do {
