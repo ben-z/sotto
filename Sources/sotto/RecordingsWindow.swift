@@ -72,7 +72,7 @@ final class RecordingsModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do { try action(); error = nil }
         catch { self.error = error.localizedDescription; AppLog.shared.record(error.localizedDescription, error: true) }
     }
-    func stop() { player?.stop(); player = nil; playingID = nil }
+    func stop() { player?.delegate = nil; player?.stop(); player = nil; playingID = nil }
     func play(_ note: RecordingRecord) {
         if playingID == note.id { stop(); return }
         perform {
@@ -84,7 +84,10 @@ final class RecordingsModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        // Retain the non-Sendable source across dispatch; the handler only compares its identity.
+        nonisolated(unsafe) let source = player
         Task { @MainActor in
+            guard self.player === source else { return }
             self.stop()
             if !flag { self.error = "Playback stopped unexpectedly. The original audio is retained." }
         }
