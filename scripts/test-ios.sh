@@ -9,6 +9,7 @@ testOptions=(-test-timeouts-enabled YES
   -default-test-execution-time-allowance 90
   -maximum-test-execution-time-allowance 120)
 xcodebuild "${build[@]}" build-for-testing
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' .build/ios/Build/Products/Debug-iphonesimulator/Sotto.app/Info.plist)" = "$(cat VERSION)"
 xcrun simctl install "$device" .build/ios/Build/Products/Debug-iphonesimulator/Sotto.app
 container="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
 python3 scripts/seed-ios-fixture.py "$container" --long-list
