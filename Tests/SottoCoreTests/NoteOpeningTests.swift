@@ -258,11 +258,11 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     try FileManager.default.createDirectory(at: transcript, withIntermediateDirectories: false)
     let library = NoteLibrary(archive: archive)
     try await library.loadHistory { _ in }
-    #expect(throws: NoteLoadFailure.self) { try library.rename(note, to: " ") }
+    #expect(throws: NoteLoadFailure.self) { try library.rename(note, to: " ", activeRecordingID: nil) }
     #expect(library.notes.first?.displayTitle == "Custom title")
     try FileManager.default.removeItem(at: transcript)
     try "The original transcript title".write(to: transcript, atomically: true, encoding: .utf8)
-    try library.rename(note, to: " ")
+    try library.rename(note, to: " ", activeRecordingID: nil)
     #expect(library.notes.first?.displayTitle == "The original transcript title")
     #expect(try NoteLibrary(directory: directory).notes.first?.displayTitle == "The original transcript title")
 }
