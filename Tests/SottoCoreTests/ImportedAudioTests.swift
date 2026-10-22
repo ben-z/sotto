@@ -26,9 +26,9 @@ private func importedAudioSnapshot(_ directory: URL) throws -> [String: Data] {
         let note = try importedAudioFixture(archive, extension: ext)
         let original = try importedAudioSnapshot(directory)
         let library = try NoteLibrary(directory: directory)
-        try await library.reloadAsync()
+        try await library.loadHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize) { _ in }
         let history = NoteLibrary(archive: archive)
-        try await history.loadHistory(activeRecordingID: nil) { _ in }
+        try await history.loadHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize) { _ in }
         #expect(history.notes.first?.audioFile == note.audioFile)
         #expect(try importedAudioSnapshot(directory) == original)
 
@@ -59,7 +59,7 @@ private func importedAudioSnapshot(_ directory: URL) throws -> [String: Data] {
             note.status = state; try archive.save(note)
             let original = try importedAudioSnapshot(directory)
             let library = NoteLibrary(archive: archive)
-            try await library.loadHistory(activeRecordingID: nil) { _ in }
+            try await library.loadHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize) { _ in }
             #expect(library.notes.first?.status == state)
             #expect(try importedAudioSnapshot(directory) == original)
 
@@ -104,7 +104,7 @@ private func importedAudioSnapshot(_ directory: URL) throws -> [String: Data] {
 
         #expect(throws: NoteLoadFailure.self) { try NoteLibrary(directory: directory) }
         let library = NoteLibrary(archive: archive)
-        await #expect(throws: NoteLoadFailure.self) { try await library.loadHistory(activeRecordingID: nil) { _ in } }
+        await #expect(throws: NoteLoadFailure.self) { try await library.loadHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize) { _ in } }
         #expect(library.notes.isEmpty)
         #expect(try importedAudioSnapshot(directory) == original)
     }

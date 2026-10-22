@@ -26,11 +26,12 @@ import Testing
     #expect(library.textRevision == original + 2)
     try library.reload()
     #expect(library.textRevision == original + 3)
-    try await library.reloadAsync()
+    library.invalidateText()
+    try await library.loadHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize) { _ in }
     #expect(library.textRevision == original + 4)
 }
 
-@MainActor @Test func historyPublicationDoesNotInvalidateSelectedText() async throws {
+@MainActor @Test func historyPagesDoNotInvalidateSelectedText() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let source = NoteLibrary(archive: try Archive(directory: directory))
     defer { try! FileManager.default.removeItem(at: directory) }
@@ -39,7 +40,9 @@ import Testing
     let history = NoteLibrary(archive: source.archive)
     let original = history.textRevision
     var versions: [Int] = []
-    try await history.loadHistory(activeRecordingID: nil) { _ in versions.append(history.textRevision) }
+    try await history.loadHistory(activeRecordingID: nil, pageSize: 1) { _ in versions.append(history.textRevision) }
+    #expect(history.notes.count == 1)
+    try await history.loadMoreHistory(activeRecordingID: nil, pageSize: 1) { _ in versions.append(history.textRevision) }
     #expect(history.notes.count == 2)
     #expect(!versions.isEmpty)
     #expect(versions.allSatisfy { $0 == original })

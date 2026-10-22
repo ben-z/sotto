@@ -7,6 +7,7 @@ public struct SottoError: LocalizedError, Sendable {
 }
 
 public struct Configuration: Codable, Sendable, Equatable {
+    public static let historyPageSize = 50
     public static let defaultMaxRecordingSeconds: Double = 3 * 60 * 60
     public static let recordingSecondsRange: ClosedRange<Double> = 1...(24 * 60 * 60)
     public var recordingsDirectory: String

@@ -19,8 +19,16 @@ import SottoCore
         var original = try archive.newRecord(model: "fixture", language: "en", prompt: "", contextTerms: [])
         original.status = "complete"; original.title = "Original recording"
         try archive.save(original)
-        let library = try NoteLibrary(directory: directory)
+        original.status = "recording"; try archive.save(original)
+        let library = NoteLibrary(archive: archive)
         let model = RecordingsModel(library: library, session: session)
+        model.refresh(); try await finish(model)
+        try expect(library.notes.first?.status == "recording", "A new window omitted an unfinished recording")
+        original.status = "transcribing"; try archive.save(original)
+        model.refresh(); try await finish(model)
+        try expect(library.notes.first?.status == "transcribing", "Refresh did not show a recording's current transcription status")
+        original.status = "complete"; try archive.save(original)
+        model.refresh(); try await finish(model)
         model.selection = [original.id]
 
         model.editing = true
@@ -68,7 +76,7 @@ import SottoCore
         try Data("{".utf8).write(to: metadata)
         model.refresh()
         try await finish(model)
-        try expect(model.error != nil && library.notes[0].title == latest.title, "A failed refresh hid its error or replaced the current notes")
+        try expect(model.historyFailure != nil && library.notes[0].title == latest.title, "A failed refresh hid its error or replaced the current notes")
         try expect(model.selection == [latest.id], "A failed refresh discarded the current selection")
         model.editing = true; model.editing = false
         try expect(!model.loading, "A failed refresh retried without a new request")
@@ -76,6 +84,47 @@ import SottoCore
         model.refresh()
         try await finish(model)
         try expect(library.notes[0].title == latest.title, "Explicit refresh could not recover after a metadata error")
-        print("Recordings refresh, editor protection, and selection checks passed.")
+        // A cold window opens one page; refreshing keeps the older selected row.
+        for index in 0..<120 {
+            var note = replacement
+            note.startedAt = Date(timeIntervalSince1970: 1_600_000_000 + Double(index * 60))
+            note.id = ISO8601DateFormatter().string(from: note.startedAt).replacingOccurrences(of: ":", with: "-") + "-fixture"
+            note.audioFile = "\(note.id).m4a"
+            note.title = "Paged recording \(index)"
+            try archive.save(note)
+        }
+        let paged = NoteLibrary(archive: archive)
+        let pagedModel = RecordingsModel(library: paged, session: session)
+        pagedModel.refresh()
+        try await finish(pagedModel)
+        try expect(paged.notes.count == Configuration.historyPageSize && paged.hasMoreHistory, "Cold window read beyond the first history page")
+        pagedModel.loadMore()
+        try await finish(pagedModel)
+        try expect(paged.notes.count == 2 * Configuration.historyPageSize, "Scrolling did not append the next history page")
+        guard let olderSelection = paged.notes.last else { throw SottoError("Missing older row") }
+        pagedModel.selection = [olderSelection.id]
+        var arrival = try archive.newRecord(model: "fixture", language: "en", prompt: "", contextTerms: [])
+        arrival.status = "complete"; arrival.title = "Arrived on another device"
+        try archive.save(arrival)
+        pagedModel.refresh()
+        try await finish(pagedModel)
+        try expect(pagedModel.selection == [olderSelection.id] && paged.notes.contains(where: { $0.id == arrival.id }), "Refresh lost the older selected row or a new arrival")
+        try expect(paged.notes.count == 2 * Configuration.historyPageSize + 1, "Refresh opened unbrowsed older notes")
+        let oldest = directory.appendingPathComponent("2020-09-13T12-26-40Z-fixture.json")
+        let validMetadata = try Data(contentsOf: oldest)
+        try Data("{".utf8).write(to: oldest)
+        pagedModel.loadMore()
+        try await finish(pagedModel)
+        try expect(pagedModel.historyFailure?.request == .older && paged.hasMoreHistory, "A failed older page lost its retry action")
+        try expect(pagedModel.selection == [olderSelection.id], "A failed older page discarded the selection")
+        pagedModel.perform { throw SottoError("Playback fixture failed") }
+        try expect(pagedModel.error == "Playback fixture failed" && pagedModel.historyFailure?.request == .older, "A new action error discarded the failed history page")
+        pagedModel.error = nil
+        try validMetadata.write(to: oldest)
+        pagedModel.retryHistory()
+        try await finish(pagedModel)
+        try expect(paged.notes.count == 122 && !paged.hasMoreHistory && pagedModel.historyFailure == nil, "Retry did not finish the failed older page")
+        print("Recordings paging, refresh, editor protection, and selection checks passed.")
+
     }
 }

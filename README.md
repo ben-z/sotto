@@ -24,6 +24,8 @@ Your key is stored in macOS Keychain. Audio goes directly to Groq using your acc
 
 Choose **Recordings…** in the menu to browse saved audio, play it, rename recordings, edit notes, or select several recordings to transcribe or delete. The window uses your configured recording folder, including existing recordings. Deletion requires confirmation.
 
+History opens the newest 50 notes, then loads earlier notes as you scroll. Sotto lists filenames to find each page and reads only that page’s metadata; audio and transcript contents are loaded when requested. Returning to the app or refreshing rereads the range you have browsed, including new arrivals and deletions from other devices. Timestamped filenames provide the order, so there is no shared index to synchronize.
+
 Opening history leaves saved recording and transcription statuses unchanged. An **Unfinished recording** or **Unfinished transcription** may belong to another device. Stop the operation there and let its files sync, then open the note and choose **Recover note…** to make it editable and available for transcription or deletion. Recovery keeps its saved audio and text. Changes to the same note from multiple devices are not coordinated.
 
 Transcription failures retain the original audio and error. Retry explicitly from the recordings window; requests are not retried after reconnecting. History transcriptions save their results without auto-pasting. Retranscription replaces machine output while preserving edited notes. Expand **Machine transcript** to read or share the result. **Replace note with transcript…** restores the transcript as the note after confirmation. The model/language picker and note/transcript controls share the same SwiftUI code with iPhone and iPad.

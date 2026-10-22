@@ -36,7 +36,7 @@ private struct HistoryStatus: View {
                 if case .reading(let loaded, let total) = progress {
                     Text("\(loaded) of \(total) notes loaded").foregroundStyle(.secondary)
                 }
-                Button("Try again") { copiedDetails = false; Task { await store.loadLibrary() } }
+                Button("Try again") { copiedDetails = false; Task { await store.retryHistory() } }
                 DisclosureGroup("Technical details") {
                     Text(failure.technicalDetails).font(.caption).textSelection(.enabled)
                     Button(copiedDetails ? "Details copied" : "Copy details") {
@@ -85,37 +85,45 @@ struct NotesView: View {
     }
     var body: some View {
         NavigationStack {
-            List(selection: $selection) {
-                HistoryStatus(store: store)
-                if library.notes.isEmpty, case .ready = store.libraryState {
-                    ContentUnavailableView("Your voice notes", systemImage: "waveform", description: Text("Record audio, then turn it into text with Groq. Original recordings are saved locally."))
-                        .listRowBackground(Color.clear)
+            GeometryReader { geometry in
+                List(selection: $selection) {
+                    if library.notes.isEmpty, case .ready = store.libraryState {
+                        ContentUnavailableView("Your voice notes", systemImage: "waveform", description: Text("Record audio, then turn it into text with Groq. Original recordings are saved locally."))
+                            .listRowBackground(Color.clear)
+                    }
+                    ForEach(library.notes) { note in
+                        NavigationLink {
+                            NoteView(store: store, library: library, id: note.id)
+                        } label: {
+                            RecordingSummary(note: note, isActive: note.id == store.recording?.id || note.id == library.transcribingID)
+                        }
+                        .accessibilityIdentifier("note-\(note.id)")
+                        .tag(note.id)
+                        .contextMenu {
+                            Button("Rename", systemImage: "pencil") {
+                                renaming = note; draftTitle = note.title ?? note.generatedTitle ?? ""; renameShown = true
+                            }.disabled(note.hasUnfinishedOperation && note.id != store.recording?.id && note.id != library.transcribingID)
+                            Button("Transcribe…", systemImage: "waveform") {
+                                transcription = TranscriptionSelection(ids: [note.id])
+                            }.disabled(note.hasUnfinishedOperation)
+                            Button("Delete", systemImage: "trash", role: .destructive) { requestDelete([note.id]) }
+                                .disabled(note.hasUnfinishedOperation)
+                        }
+                        .swipeActions {
+                            Button("Delete", role: .destructive) { requestDelete([note.id]) }
+                                .disabled(note.hasUnfinishedOperation)
+                        }
+                    }
+                    HistoryStatus(store: store)
+                    if library.hasMoreHistory || store.openingLibrary {
+                        HistoryPagingFooter(viewport: geometry.frame(in: .global), loading: store.openingLibrary,
+                                            canLoadMore: library.hasMoreHistory && historyReady) {
+                            Task { await store.loadMoreHistory() }
+                        }
+                    }
                 }
-                ForEach(library.notes) { note in
-                    NavigationLink {
-                        NoteView(store: store, library: library, id: note.id)
-                    } label: {
-                        RecordingSummary(note: note, isActive: note.id == store.recording?.id || note.id == library.transcribingID)
-                    }
-                    .accessibilityIdentifier("note-\(note.id)")
-                    .tag(note.id)
-                    .contextMenu {
-                        Button("Rename", systemImage: "pencil") {
-                            renaming = note; draftTitle = note.title ?? note.generatedTitle ?? ""; renameShown = true
-                        }.disabled(note.hasUnfinishedOperation && note.id != store.recording?.id && note.id != library.transcribingID)
-                        Button("Transcribe…", systemImage: "waveform") {
-                            transcription = TranscriptionSelection(ids: [note.id])
-                        }.disabled(note.hasUnfinishedOperation)
-                        Button("Delete", systemImage: "trash", role: .destructive) { requestDelete([note.id]) }
-                            .disabled(note.hasUnfinishedOperation)
-                    }
-                    .swipeActions {
-                        Button("Delete", role: .destructive) { requestDelete([note.id]) }
-                            .disabled(note.hasUnfinishedOperation)
-                    }
-                }
+                .refreshable { await store.loadLibrary() }
             }
-            .refreshable { await store.loadLibrary() }
             .environment(\.editMode, $editMode)
             .navigationTitle("Notes")
             .toolbar {
@@ -156,6 +164,7 @@ struct NotesView: View {
             .onChange(of: store.recording?.id) { _, id in
                 if id != nil { editMode = .inactive; selection.removeAll() }
             }
+            .onChange(of: library.notes.map(\.id)) { _, ids in selection.formIntersection(ids) }
             .sheet(isPresented: $settings) { SettingsView(store: store) }
             .sheet(item: $transcription) { TranscribeSheet(store: store, ids: $0.ids) }
             .alert("Rename note", isPresented: $renameShown) {
@@ -175,6 +184,10 @@ struct NotesView: View {
                 }
             } message: { Text("The recordings, transcripts, and edited notes will be permanently deleted.") }
         }
+    }
+    private var historyReady: Bool {
+        if case .ready = store.libraryState { return true }
+        return false
     }
     private func requestDelete(_ ids: Set<String>) { deleting = ids; confirmDelete = true }
 }
@@ -213,7 +226,8 @@ struct NoteView: View {
                     ShareLink("Share audio", item: library.archive.audioURL(note))
                 }
                 Section {
-                    NoteContent(library: library, id: id, canEdit: !note.hasUnfinishedOperation, editingChanged: { _ in })
+                    NoteContent(library: library, id: id, canEdit: !note.hasUnfinishedOperation && !store.openingLibrary,
+                                editingChanged: { store.editingNote = $0 })
                         .id(id)
                 }
                 Section {

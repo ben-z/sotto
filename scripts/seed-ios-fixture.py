@@ -7,8 +7,8 @@ import shutil
 import sys
 
 container = Path(sys.argv[1])
-if sys.argv[2:] not in ([], ["--long-list"]):
-    raise SystemExit("Expected a simulator app data directory and optional --long-list")
+if sys.argv[2:] not in ([], ["--long-list"], ["--paged-history"]):
+    raise SystemExit("Expected a simulator app data directory and optional --long-list or --paged-history")
 if not container.is_absolute() or not container.is_dir() or "CoreSimulator" not in container.parts:
     raise SystemExit("Expected an existing simulator app data directory")
 fixture = Path(__file__).resolve().parents[1] / "iOS/UITests/Fixtures/tone.m4a"
@@ -18,6 +18,25 @@ for required in (fixture, playback_fixture):
         raise SystemExit(f"Required audio fixture is missing: {required}")
 library = container / "Documents/Recordings"
 library.mkdir(parents=True, exist_ok=True)
+for path in library.glob("*-ios-paging-fixture.json"):
+    path.unlink()
+if sys.argv[2:] == ["--paged-history"]:
+    # Timestamped filenames exercise the same newest-first page boundaries as recordings.
+    for index in range(125):
+        started = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc) + datetime.timedelta(seconds=index)
+        identifier = f"{started.strftime('%Y-%m-%dT%H-%M-%SZ')}-ios-paging-fixture"
+        metadata = library / f"{identifier}.json"
+        if index == 0:
+            metadata.write_text("{")
+        else:
+            metadata.write_text(json.dumps({
+                "id": identifier, "title": f"History fixture {index}",
+                "startedAt": started.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "status": "complete", "model": "whisper-large-v3-turbo", "language": "en",
+                "prompt": "", "contextTerms": [], "audioFile": f"{identifier}.m4a",
+            }))
+    print(f"Seeded 125 history metadata files in {library}; the oldest is unreadable")
+    raise SystemExit(0)
 identifier = "ios-ui-fixture"
 (library / f"{identifier}.md").unlink(missing_ok=True)
 audio = library / f"{identifier}.m4a"

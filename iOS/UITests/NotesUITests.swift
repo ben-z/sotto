@@ -2,6 +2,45 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
+    func testHistoryLoadsOnlyAsTheListScrolls() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let newest = app.buttons["note-2020-01-01T00-02-04Z-ios-paging-fixture"]
+        XCTAssertTrue(newest.waitForExistence(timeout: 10))
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !app.progressIndicators.firstMatch.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
+        let failure = app.staticTexts["Some earlier notes could not be loaded. You can still record."]
+        let pagingRows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-2020-01-01T"))
+        let older = pagingRows.matching(NSPredicate(format: "identifier <= %@", "note-2020-01-01T00-01-14Z-ios-paging-fixture")).firstMatch
+        XCTAssertFalse(older.exists, "Startup must leave older pages unread")
+        XCTAssertFalse(failure.exists, "The unreadable oldest file must not fail the first page")
+
+        // A complete recording exercises the stationary list without a timing-only wait.
+        app.buttons["record-note"].tap()
+        let stop = app.buttons["Stop recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 10))
+        Thread.sleep(forTimeInterval: 1)
+        stop.tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10))
+        XCTAssertFalse(failure.exists, "The stationary list must not drain the remaining pages")
+        XCTAssertFalse(older.exists)
+        deleteNote(saved, in: app)
+
+        scrollToHistoryControl(older, in: app, towardStart: false)
+        XCTAssertEqual(app.buttons.matching(identifier: older.identifier).count, 1)
+        XCTAssertFalse(failure.exists, "Scrolling to the second page must not read the oldest page")
+        scrollToHistoryControl(app.buttons["Try again"], in: app, towardStart: false)
+        XCTAssertTrue(failure.isHittable)
+        XCTAssertTrue(app.buttons["record-note"].isHittable)
+        XCTAssertFalse(app.progressIndicators.firstMatch.exists)
+        app.buttons["Technical details"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "2020-01-01T00-00-00Z-ios-paging-fixture.json")).firstMatch.waitForExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Older history page read failure"; attachment.lifetime = .keepAlways; add(attachment)
+        app.terminate()
+    }
+
     func testPullToRefreshPreservesRecording() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
@@ -24,6 +63,45 @@ final class NotesUITests: XCTestCase {
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
         XCTAssertTrue(saved.waitForExistence(timeout: 10))
         deleteNote(saved, in: app)
+    }
+
+    private func scrollToHistoryControl(_ element: XCUIElement, in app: XCUIApplication, towardStart: Bool) {
+        var previous: [String]?
+        var previousFrame: CGRect?
+        let list = app.collectionViews.firstMatch
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-"))
+        while !element.exists {
+            let visible = rows.allElementsBoundByIndex.map(\.identifier)
+            let frame = list.cells.firstMatch.frame
+            guard visible != previous || frame != previousFrame else {
+                XCTFail("Scrolling stopped before the next history page or error appeared. Visible notes: \(visible)")
+                return
+            }
+            previous = visible; previousFrame = frame
+            if towardStart { list.swipeDown() } else { list.swipeUp() }
+        }
+        // Preserve the matched row while scrolling changes the virtualized first match.
+        let target = app.descendants(matching: element.elementType).matching(NSPredicate(format: "identifier == %@ AND label == %@", element.identifier, element.label)).firstMatch
+        previousFrame = nil
+        while true {
+            let frame = target.frame
+            let bounds = list.frame
+            let top = max(bounds.minY, app.navigationBars.firstMatch.frame.maxY)
+            let bottom = min(bounds.maxY, app.buttons["record-note"].frame.minY)
+            if frame.minY >= top.nextDown && frame.maxY <= bottom {
+                XCTAssertTrue(target.isHittable)
+                return
+            }
+            guard frame != previousFrame, frame.height <= bottom - top else {
+                XCTFail("The history control could not be scrolled fully above Record and below navigation: \(frame)")
+                return
+            }
+            previousFrame = frame
+            let middle = (top + bottom) / 2
+            let start = list.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: bounds.width / 2, dy: middle - bounds.minY))
+            let end = min(bottom, max(top, middle + middle - frame.midY))
+            start.press(forDuration: 0, thenDragTo: start.withOffset(CGVector(dx: 0, dy: end - middle)))
+        }
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, inNoteList: Bool) {
@@ -186,8 +264,10 @@ final class NotesUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
         let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "load earlier notes")).firstMatch
-        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-ios-")).firstMatch.waitForExistence(timeout: 10))
         let progress = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ of [0-9]+ notes loaded")).firstMatch
+        scrollToHistoryControl(progress, in: app, towardStart: false)
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
         XCTAssertTrue(progress.exists)
         let initialProgress = progress.label
         let counts = initialProgress.split(separator: " ")
@@ -197,7 +277,6 @@ final class NotesUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(loaded, 3)
         XCTAssertEqual(total, loaded + 1)
         XCTAssertTrue(app.buttons["record-note"].exists)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-ios-")).firstMatch.exists)
         XCTAssertFalse(app.buttons["Choose notes folder"].exists)
         XCTAssertFalse(app.progressIndicators.firstMatch.exists)
         app.buttons["record-note"].tap()
@@ -205,18 +284,26 @@ final class NotesUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         app.buttons["Stop recording"].tap()
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
+        scrollToHistoryControl(saved, in: app, towardStart: true)
         XCTAssertTrue(saved.waitForExistence(timeout: 10))
+        scrollToHistoryControl(app.buttons["Try again"], in: app, towardStart: false)
         app.buttons["Try again"].tap()
+        scrollToHistoryControl(progress, in: app, towardStart: false)
         XCTAssertTrue(failure.waitForExistence(timeout: 10))
         XCTAssertEqual(progress.label, "\(loaded + 1) of \(total + 1) notes loaded")
+        scrollToHistoryControl(saved, in: app, towardStart: true)
         XCTAssertTrue(saved.exists)
+        scrollToHistoryControl(app.buttons["Technical details"], in: app, towardStart: false)
         app.buttons["Technical details"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "000-unreadable.json")).firstMatch.exists)
+        scrollToHistoryControl(app.buttons["Copy details"], in: app, towardStart: false)
         app.buttons["Copy details"].tap()
         XCTAssertTrue(app.buttons["Details copied"].exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Library read failure details"; attachment.lifetime = .keepAlways; add(attachment)
+        scrollToHistoryControl(app.buttons["Technical details"], in: app, towardStart: true)
         app.buttons["Technical details"].tap()
+        scrollToHistoryControl(saved, in: app, towardStart: true)
         deleteNote(saved, in: app)
     }
 

@@ -42,7 +42,10 @@ final class RecordingsModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var selection = Set<String>()
     @Published var error: String?
     @Published var playingID: String?
+    enum HistoryRequest { case refresh, older }
     @Published var loading = false
+    @Published private(set) var historyProgress: NoteLoadProgress?
+    @Published private(set) var historyFailure: (request: HistoryRequest, message: String)?
     @Published var working = false {
         didSet { if !working && needsRefresh { refresh() } }
     }
@@ -58,19 +61,43 @@ final class RecordingsModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         needsRefresh = true
         if [.preparing, .recording].contains(session.state) { stop() }
         guard !loading, !working, !editing else { return }
+        startHistory(.refresh)
+    }
+    func loadMore() {
+        guard !loading, !working, !editing, library.hasMoreHistory else { return }
+        startHistory(.older)
+    }
+    func retryHistory() {
+        guard let historyFailure else { return }
+        switch historyFailure.request {
+        case .refresh: refresh()
+        case .older: loadMore()
+        }
+    }
+    private func startHistory(_ request: HistoryRequest) {
         loading = true
         Task {
-            defer { loading = false }
-            do {
-                repeat {
-                    needsRefresh = false
-                    try await library.reloadAsync()
+            defer { loading = false; historyProgress = nil }
+            var current = request
+            repeat {
+                if current == .refresh { needsRefresh = false }
+                historyFailure = nil
+                do {
+                    let report: @MainActor @Sendable (NoteLoadProgress) -> Void = { self.historyProgress = $0 }
+                    switch current {
+                    case .refresh:
+                        defer { library.invalidateText() }
+                        // Session persists its recording directly to Archive; refresh reads that current state.
+                        try await library.loadHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize, progress: report)
+                    case .older:
+                        try await library.loadMoreHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize, progress: report)
+                    }
                     selection.formIntersection(Set(library.notes.map(\.id)))
-                } while needsRefresh
-            } catch {
-                needsRefresh = false
-                self.error = error.localizedDescription
-            }
+                } catch {
+                    historyFailure = (current, error.localizedDescription)
+                }
+                current = .refresh
+            } while needsRefresh && !working && !editing
         }
     }
     var selectionIncludesUnfinishedNotes: Bool {
@@ -126,15 +153,28 @@ private struct RecordingsView: View {
     @ObservedObject var library: NoteLibrary
     @ObservedObject var session: Session
     @State private var deleting = false
+    @State private var refreshOnActivation = false
     var body: some View {
         NavigationSplitView {
-            List(library.notes, selection: $model.selection) { note in
-                RecordingSummary(note: note, isActive: note.id == session.activeRecordingID || note.id == library.transcribingID).tag(note.id)
-            }
-            .disabled(model.editing)
-            .overlay {
-                if model.loading { ProgressView("Loading recordings…") }
-                else if library.notes.isEmpty { ContentUnavailableView("No recordings", systemImage: "waveform", description: Text("Your recordings will appear here.")) }
+            GeometryReader { geometry in
+                List(selection: $model.selection) {
+                    ForEach(library.notes) { note in
+                        RecordingSummary(note: note, isActive: note.id == session.activeRecordingID || note.id == library.transcribingID).tag(note.id)
+                    }
+                    if case let .reading(loaded, total) = model.historyProgress {
+                        ProgressView(value: Double(loaded), total: Double(max(total, 1))) {
+                            Text("Loaded \(loaded) of \(total) notes")
+                        }
+                    }
+                    HistoryPagingFooter(viewport: geometry.frame(in: .global), loading: model.loading,
+                                        canLoadMore: library.hasMoreHistory && model.historyFailure == nil && !model.working && !model.editing) { model.loadMore() }
+                }
+                .disabled(model.editing)
+                .overlay {
+                    if !model.loading && library.notes.isEmpty && model.historyFailure == nil {
+                        ContentUnavailableView("No recordings", systemImage: "waveform", description: Text("Your recordings will appear here."))
+                    }
+                }
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 290)
         } detail: {
@@ -146,20 +186,35 @@ private struct RecordingsView: View {
             }
         }
         .navigationTitle("Sotto Recordings")
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            refreshOnActivation = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if refreshOnActivation {
+                refreshOnActivation = false
+                model.refresh()
+            }
+        }
         .toolbar {
             Button("Show Recordings Folder", systemImage: "folder") { NSWorkspace.shared.open(library.archive.directory) }
+            Button("Refresh Recordings", systemImage: "arrow.clockwise") { model.refresh() }
+                .disabled(model.loading || model.working || model.editing)
             Spacer()
             if model.working { Button("Cancel Transcription") { model.cancelTranscription() } }
             Button(transcriptionTitle) { confirming = true }.disabled(model.selection.isEmpty || model.busy || model.selectionIncludesUnfinishedNotes)
             Button("Delete…") { deleting = true }.disabled(model.selection.isEmpty || model.busy || model.selectionIncludesUnfinishedNotes)
         }
         .safeAreaInset(edge: .bottom) {
-            if let error = model.error {
+            if let error = model.error ?? model.historyFailure?.message {
                 HStack(alignment: .top) {
                     Image(systemName: "exclamationmark.triangle")
                     Text(error).textSelection(.enabled)
                     Spacer()
-                    Button("Dismiss", systemImage: "xmark") { model.error = nil }.labelStyle(.iconOnly)
+                    if model.error != nil {
+                        Button("Dismiss", systemImage: "xmark") { model.error = nil }.labelStyle(.iconOnly)
+                    } else {
+                        Button("Try again") { model.retryHistory() }
+                    }
                 }.padding().background(.bar)
             }
         }

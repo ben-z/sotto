@@ -364,7 +364,7 @@ private func queuedNote(_ library: NoteLibrary) throws -> RecordingRecord {
     let note = try queuedNote(source)
     let history = NoteLibrary(archive: source.archive)
     #expect(history.notes.isEmpty)
-    try await history.reloadAsync()
+    try await history.loadHistory(activeRecordingID: nil, pageSize: Configuration.historyPageSize) { _ in }
     #expect(history.notes.map(\.id) == [note.id])
     #expect(history.notes.first?.status == "queued")
 }
