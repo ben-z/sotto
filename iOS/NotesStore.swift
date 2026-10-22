@@ -22,6 +22,17 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
     }
     private var openingTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+    private enum HistoryRequest { case initial, refresh, older }
+    private var failedHistoryRequest: HistoryRequest?
+    private var needsHistoryRefresh = false
+    var editingNote = false {
+        didSet {
+            if !editingNote && needsHistoryRefresh && historyTask == nil {
+                needsHistoryRefresh = false
+                Task { await loadLibrary() }
+            }
+        }
+    }
     private var selectedFolder: URL?
     private var folder: NotesFolder?
     @Published var recording: RecordingRecord?
@@ -80,7 +91,24 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func loadLibrary() async {
         if library == nil { await startOpening().value }
-        else { await startHistoryLoading().value }
+        else if editingNote { needsHistoryRefresh = true }
+        else { await startHistoryLoading(.refresh).value }
+    }
+
+    func refreshAfterForegrounding() async {
+        guard library != nil, openingTask == nil else { return }
+        await loadLibrary()
+    }
+
+    func loadMoreHistory() async {
+        guard !editingNote, historyTask == nil, library?.hasMoreHistory == true,
+              case .ready = libraryState else { return }
+        await startHistoryLoading(.older).value
+    }
+
+    func retryHistory() async {
+        guard !editingNote, let failedHistoryRequest else { return }
+        await startHistoryLoading(failedHistoryRequest).value
     }
 
     private func startOpening() -> Task<Void, Never> {
@@ -103,7 +131,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
                 }
                 folder = destination
                 library = NoteLibrary(archive: archive)
-                _ = startHistoryLoading()
+                _ = startHistoryLoading(.initial)
             } catch {
                 let failure: NoteLoadFailure
                 if let reported = error as? NoteLoadFailure { failure = reported }
@@ -116,26 +144,43 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         return task
     }
 
-    private func startHistoryLoading() -> Task<Void, Never> {
-        if let historyTask { return historyTask }
+    private func startHistoryLoading(_ request: HistoryRequest) -> Task<Void, Never> {
+        if let historyTask {
+            if request == .refresh { needsHistoryRefresh = true }
+            return historyTask
+        }
         guard let library else { preconditionFailure("Open the notes folder before loading history.") }
         libraryState = .loading(.reading(loaded: 0, total: 0))
         let task = Task {
-            defer { historyTask = nil; library.invalidateText() }
-            var progress = NoteLoadProgress.reading(loaded: 0, total: 0)
-            do {
-                try await library.loadHistory(activeRecordingID: recording?.id) { update in
-                    progress = update
-                    self.libraryState = .loading(update)
+            defer { historyTask = nil }
+            var request = request
+            while true {
+                libraryState = .loading(.reading(loaded: 0, total: 0))
+                var progress = NoteLoadProgress.reading(loaded: 0, total: 0)
+                let report: @MainActor @Sendable (NoteLoadProgress) -> Void = { update in
+                    progress = update; self.libraryState = .loading(update)
                 }
-                libraryState = .ready
-                log.notice("Opened \(library.notes.count) notes")
-            } catch {
-                let failure: NoteLoadFailure
-                if let reported = error as? NoteLoadFailure { failure = reported }
-                else { failure = NoteLoadFailure(operation: .openFolder, url: library.archive.directory, underlying: error) }
-                log.error("Opening notes failed: \(failure.technicalDetails, privacy: .public)")
-                libraryState = .failed(failure, progress: progress)
+                do {
+                    if request == .older {
+                        try await library.loadMoreHistory(activeRecordingID: recording?.id, pageSize: Configuration.historyPageSize, progress: report)
+                    } else {
+                        try await library.loadHistory(activeRecordingID: recording?.id, pageSize: Configuration.historyPageSize, progress: report)
+                    }
+                    failedHistoryRequest = nil
+                    libraryState = .ready
+                    log.notice("Loaded \(library.notes.count) notes")
+                } catch {
+                    let failure: NoteLoadFailure
+                    if let reported = error as? NoteLoadFailure { failure = reported }
+                    else { failure = NoteLoadFailure(operation: .openFolder, url: library.archive.directory, underlying: error) }
+                    log.error("Loading notes failed: \(failure.technicalDetails, privacy: .public)")
+                    failedHistoryRequest = request
+                    libraryState = .failed(failure, progress: progress)
+                }
+                if request == .refresh { library.invalidateText() }
+                guard needsHistoryRefresh, !editingNote else { break }
+                needsHistoryRefresh = false
+                request = .refresh
             }
         }
         historyTask = task

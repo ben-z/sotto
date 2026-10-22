@@ -9,10 +9,12 @@ public final class NoteLibrary: ObservableObject {
     @Published public private(set) var transcribingID: String?
     @Published public private(set) var issue: String?
     @Published public private(set) var textRevision = 0
+    @Published public private(set) var hasMoreHistory = false
     public let archive: Archive
     private let log = Logger(subsystem: "dev.sotto.notes", category: "queue")
     // Live edits and deletions take precedence over the history snapshot.
     private var historyChanges: Set<String>?
+    private var oldestLoadedFile: String?
 
     public init(archive: Archive) { self.archive = archive }
 
@@ -29,25 +31,40 @@ public final class NoteLibrary: ObservableObject {
         invalidateText()
     }
 
-    public func reloadAsync() async throws {
-        let archive = archive
-        notes = try await Task.detached {
-            try Self.readRecords(archive: archive)
-        }.value
-        invalidateText()
+    /// Refresh the browsed range, including new arrivals, without opening older metadata.
+    public func loadHistory(activeRecordingID: String?, pageSize: Int, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
+        try await readHistory(more: false, activeRecordingID: activeRecordingID, pageSize: pageSize, progress: progress)
     }
 
-    /// Publish each validated saved note without changing its files, preserving live changes.
-    public func loadHistory(activeRecordingID: String?, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
+    /// Read the next page after the oldest filename successfully loaded.
+    public func loadMoreHistory(activeRecordingID: String?, pageSize: Int, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
+        guard oldestLoadedFile != nil else { throw SottoError("Load the newest notes before loading earlier notes.") }
+        try await readHistory(more: true, activeRecordingID: activeRecordingID, pageSize: pageSize, progress: progress)
+    }
+
+    private func readHistory(more: Bool, activeRecordingID: String?, pageSize: Int, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws {
+        guard pageSize > 0 else { throw SottoError("The note history page size must be positive.") }
         guard historyChanges == nil else { throw SottoError("Note history is already loading.") }
         historyChanges = Set([activeRecordingID, transcribingID].compactMap { $0 })
         defer { historyChanges = nil }
         let archive = archive
+        let cursor = oldestLoadedFile
         let task = Task.detached {
             let files = try Self.metadataFiles(archive: archive)
-            let ids = Set(files.map { $0.deletingPathExtension().lastPathComponent })
-            await progress(.reading(loaded: 0, total: files.count))
-            for (index, url) in files.enumerated() {
+            var ids = Set(files.map { $0.deletingPathExtension().lastPathComponent })
+            let page: [URL]
+            if let cursor {
+                if more {
+                    page = Array(files.lazy.filter { $0.lastPathComponent < cursor }.prefix(pageSize))
+                } else {
+                    let browsed = files.prefix { $0.lastPathComponent >= cursor }.count
+                    page = Array(files.prefix(max(pageSize, browsed)))
+                }
+            } else {
+                page = Array(files.prefix(pageSize))
+            }
+            await progress(.reading(loaded: 0, total: page.count))
+            for (index, url) in page.enumerated() {
                 try Task.checkCancellation()
                 let id = url.deletingPathExtension().lastPathComponent
                 let note: RecordingRecord?
@@ -55,24 +72,36 @@ public final class NoteLibrary: ObservableObject {
                     note = try Self.readRecord(url)
                 } catch {
                     try Task.checkCancellation()
-                    // A note deleted through this library can disappear during its read.
-                    guard await self.deletedDuringHistoryLoad(id) else { throw error }
-                    note = nil
+                    if await self.deletedDuringHistoryLoad(id) {
+                        note = nil
+                    } else if let failure = error as? NoteLoadFailure,
+                              (failure.underlying as? CocoaError)?.code == .fileReadNoSuchFile,
+                              try Self.metadataFiles(archive: archive).contains(url) == false {
+                        // Another device can delete a file between listing and reading it.
+                        ids.remove(id)
+                        note = nil
+                    } else {
+                        throw error
+                    }
                 }
                 try Task.checkCancellation()
                 await MainActor.run {
                     if let note { self.publishHistory(note) }
-                    progress(.reading(loaded: index + 1, total: files.count))
+                    progress(.reading(loaded: index + 1, total: page.count))
                 }
             }
             try Task.checkCancellation()
-            return ids
+            let oldest = page.last?.lastPathComponent ?? (more ? cursor : nil)
+            let hasMore = oldest.map { oldest in files.contains { $0.lastPathComponent < oldest } } ?? false
+            return (ids, oldest, hasMore)
         }
-        let ids = try await withTaskCancellationHandler {
+        let (ids, oldest, hasMore) = try await withTaskCancellationHandler {
             try await task.value
         } onCancel: { task.cancel() }
         try Task.checkCancellation()
         notes.removeAll { !ids.contains($0.id) && historyChanges?.contains($0.id) == false }
+        oldestLoadedFile = oldest
+        hasMoreHistory = hasMore
     }
 
     private func deletedDuringHistoryLoad(_ id: String) -> Bool {
@@ -109,14 +138,14 @@ public final class NoteLibrary: ObservableObject {
         catch { throw NoteLoadFailure(operation: .recoverNote, url: url, underlying: error) }
     }
 
-    /// Publish a library only after every metadata read succeeds.
-    public static func open(directory: URL, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws -> NoteLibrary {
+    /// Open a library after its first page succeeds.
+    public static func open(directory: URL, pageSize: Int, progress: @escaping @MainActor @Sendable (NoteLoadProgress) -> Void) async throws -> NoteLibrary {
         progress(.opening)
         let archive: Archive
         do { archive = try await Task.detached { try Archive(directory: directory) }.value }
         catch { throw NoteLoadFailure(operation: .openFolder, url: directory, underlying: error) }
         let library = NoteLibrary(archive: archive)
-        try await library.loadHistory(activeRecordingID: nil, progress: progress)
+        try await library.loadHistory(activeRecordingID: nil, pageSize: pageSize, progress: progress)
         return library
     }
 

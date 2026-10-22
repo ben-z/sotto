@@ -6,6 +6,7 @@ import SottoCore
 struct SottoNotesApp: App {
     @StateObject private var store = NotesStore.shared
     @Environment(\.scenePhase) private var phase
+    @State private var refreshOnForeground = false
     var body: some Scene {
         WindowGroup {
             Group {
@@ -14,7 +15,11 @@ struct SottoNotesApp: App {
             }
             .task { await store.openLibraryIfNeeded() }
             .onChange(of: phase) { _, value in
-                if value == .background { store.suspend() }
+                if value == .background { store.suspend(); refreshOnForeground = true }
+                if value == .active && refreshOnForeground {
+                    refreshOnForeground = false
+                    Task { await store.refreshAfterForegrounding() }
+                }
             }
         }
     }

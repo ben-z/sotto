@@ -8,12 +8,23 @@ build=(-project iOS/Sotto.xcodeproj -scheme Sotto
 testOptions=(-test-timeouts-enabled YES
   -default-test-execution-time-allowance 90
   -maximum-test-execution-time-allowance 120)
+# Traversing 125 history rows and the real one-minute recording need a longer allowance.
+longTestAllowance=180
+longTestOptions=(-test-timeouts-enabled YES
+  -default-test-execution-time-allowance "$longTestAllowance"
+  -maximum-test-execution-time-allowance "$longTestAllowance")
 xcodebuild "${build[@]}" build-for-testing
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' .build/ios/Build/Products/Debug-iphonesimulator/Sotto.app/Info.plist)" = "$(cat VERSION)"
 xcrun simctl install "$device" .build/ios/Build/Products/Debug-iphonesimulator/Sotto.app
 container="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
-python3 scripts/seed-ios-fixture.py "$container" --long-list
 result="${SOTTO_IOS_RESULT_PATH:-work/ios-tests-$(date -u +%Y%m%dT%H%M%SZ).xcresult}"
+python3 scripts/seed-ios-fixture.py "$container" --paged-history
+xcrun simctl privacy "$device" grant microphone dev.sotto.notes
+xcodebuild "${build[@]}" "${longTestOptions[@]}" \
+  -resultBundlePath "${result%.xcresult}-paged-history.xcresult" \
+  -only-testing:SottoUITests/NotesUITests/testHistoryLoadsOnlyAsTheListScrolls test-without-building
+container="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
+python3 scripts/seed-ios-fixture.py "$container" --long-list
 xcrun simctl privacy "$device" revoke microphone dev.sotto.notes
 xcodebuild "${build[@]}" "${testOptions[@]}" \
   -resultBundlePath "${result%.xcresult}-microphone-denied.xcresult" \
@@ -51,11 +62,7 @@ for locationTest in testBackToBackRecordingsKeepTheirLocations testRecordEditAnd
     -resultBundlePath "${result%.xcresult}-$locationTest.xcresult" \
     "-only-testing:SottoUITests/NotesUITests/$locationTest" test-without-building
 done
-# The real one-minute recording plus settings and relaunch checks need their own budget.
-recordingLimitAllowance=180
-xcodebuild "${build[@]}" -test-timeouts-enabled YES \
-  -default-test-execution-time-allowance "$recordingLimitAllowance" \
-  -maximum-test-execution-time-allowance "$recordingLimitAllowance" \
+xcodebuild "${build[@]}" "${longTestOptions[@]}" \
   -resultBundlePath "${result%.xcresult}-recording-limit.xcresult" \
   -only-testing:SottoUITests/NotesUITests/testRecordingLimitPersistsAndStopsAtCapturedDeadline test-without-building
 xcodebuild "${build[@]}" "${testOptions[@]}" \
@@ -65,4 +72,5 @@ xcodebuild "${build[@]}" "${testOptions[@]}" \
   -skip-testing:SottoUITests/NotesUITests/testBackToBackRecordingsKeepTheirLocations \
   -skip-testing:SottoUITests/NotesUITests/testRecordEditAndRecoverWithoutKey \
   -skip-testing:SottoUITests/NotesUITests/testRecordingLimitPersistsAndStopsAtCapturedDeadline \
+  -skip-testing:SottoUITests/NotesUITests/testHistoryLoadsOnlyAsTheListScrolls \
   -resultBundlePath "$result" test-without-building
