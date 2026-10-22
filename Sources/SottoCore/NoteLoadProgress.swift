@@ -27,7 +27,7 @@ public struct NoteLoadFailure: LocalizedError, Sendable {
         switch operation {
         case .openFolder: "The notes folder couldn’t be opened."
         case .readNote: "Cannot read \(url.lastPathComponent): \(underlying.localizedDescription)"
-        case .recoverNote: "The interrupted status couldn’t be saved for \(url.lastPathComponent)."
+        case .recoverNote: "Cannot recover \(url.lastPathComponent): \(underlying.localizedDescription)"
         case .saveFolder: "The folder selection couldn’t be saved."
         }
     }

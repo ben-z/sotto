@@ -40,9 +40,6 @@ final class RecordingsWindow: NSWindowController, NSWindowDelegate {
                     loadedVersion = refreshVersion
                     try await library.reloadAsync()
                 } while loadedVersion != refreshVersion
-                var activeIDs = Set<String>()
-                if let id = model.session.activeRecordingID { activeIDs.insert(id) }
-                try library.recoverInterrupted(excluding: activeIDs)
             } catch { model.error = error.localizedDescription }
             model.loading = false
         }
@@ -68,6 +65,9 @@ final class RecordingsModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var worker: Task<Void, Never>?
     init(library: NoteLibrary, session: Session) { self.library = library; self.session = session }
     var busy: Bool { loading || working || editing || [.preparing, .recording, .transcribing].contains(session.state) }
+    var selectionIncludesUnfinishedNotes: Bool {
+        library.notes.contains { selection.contains($0.id) && $0.hasUnfinishedOperation }
+    }
     func perform(_ action: () throws -> Void) {
         do { try action(); error = nil }
         catch { self.error = error.localizedDescription; AppLog.shared.record(error.localizedDescription, error: true) }
@@ -121,7 +121,7 @@ private struct RecordingsView: View {
     var body: some View {
         NavigationSplitView {
             List(library.notes, selection: $model.selection) { note in
-                RecordingSummary(note: note).tag(note.id)
+                RecordingSummary(note: note, isActive: note.id == session.activeRecordingID || note.id == library.transcribingID).tag(note.id)
             }
             .disabled(model.editing)
             .overlay {
@@ -142,8 +142,8 @@ private struct RecordingsView: View {
             Button("Show Recordings Folder", systemImage: "folder") { NSWorkspace.shared.open(library.archive.directory) }
             Spacer()
             if model.working { Button("Cancel Transcription") { model.cancelTranscription() } }
-            Button(transcriptionTitle) { confirming = true }.disabled(model.selection.isEmpty || model.busy)
-            Button("Delete…") { deleting = true }.disabled(model.selection.isEmpty || model.busy)
+            Button(transcriptionTitle) { confirming = true }.disabled(model.selection.isEmpty || model.busy || model.selectionIncludesUnfinishedNotes)
+            Button("Delete…") { deleting = true }.disabled(model.selection.isEmpty || model.busy || model.selectionIncludesUnfinishedNotes)
         }
         .safeAreaInset(edge: .bottom) {
             if let error = model.error {
@@ -182,17 +182,23 @@ private struct RecordingDetail: View {
     let note: RecordingRecord
     @State private var title = ""
     @State private var renaming = false
+    private var isActive: Bool { note.id == model.session.activeRecordingID || note.id == library.transcribingID }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Button { title = note.title ?? note.generatedTitle ?? ""; renaming = true } label: {
                 HStack { Text(note.displayTitle).font(.title2); Image(systemName: "pencil").foregroundStyle(.secondary) }
-            }.buttonStyle(.plain).disabled(model.busy)
+            }.buttonStyle(.plain).disabled(model.busy || (note.hasUnfinishedOperation && !isActive))
             .alert("Rename recording", isPresented: $renaming) {
                 TextField("Title", text: $title)
                 Button("Cancel", role: .cancel) { }
-                Button("Save") { model.perform { try library.rename(note, to: title) } }
+                Button("Save") { model.perform { try library.rename(note, to: title, activeRecordingID: model.session.activeRecordingID) } }
             }
             Text(note.startedAt, format: .dateTime.year().month().day().hour().minute().timeZone()).foregroundStyle(.secondary)
+            if note.hasUnfinishedOperation && !isActive {
+                RecoverNoteButton {
+                    model.perform { try library.recover(note.id, activeRecordingID: model.session.activeRecordingID) }
+                }.disabled(model.busy)
+            }
             HStack {
                 Button(model.playingID == note.id ? "Stop Playback" : "Play Recording", systemImage: "play.fill") { model.play(note) }.disabled(model.busy)
                 ShareLink("Share Audio", item: library.archive.audioURL(note))
@@ -200,7 +206,7 @@ private struct RecordingDetail: View {
                 Button("Show Audio in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.archive.audioURL(note)]) }
             }
             ScrollView {
-                NoteContent(library: library, id: note.id, canEdit: !model.busy) { model.editing = $0 }
+                NoteContent(library: library, id: note.id, canEdit: !model.busy && !note.hasUnfinishedOperation) { model.editing = $0 }
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

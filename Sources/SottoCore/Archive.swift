@@ -28,6 +28,7 @@ public struct RecordingRecord: Codable, Sendable, Identifiable {
     public var requestMilliseconds: Int?
     public var requestID: String?
     public var error: String?
+    public var hasUnfinishedOperation: Bool { status == "recording" || status == "transcribing" }
 
     public init(id: String, model: String, language: String?, prompt: String, contextTerms: [String], audioFile: String) {
         self.id = id; startedAt = Date(); status = "recording"

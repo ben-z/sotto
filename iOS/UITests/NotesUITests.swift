@@ -445,6 +445,8 @@ final class NotesUITests: XCTestCase {
         // A one-shot location request needs foreground access before backgrounding.
         let recordingRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label ENDSWITH %@", "note-", "Recording")).firstMatch
         XCTAssertTrue(recordingRow.waitForExistence(timeout: 5)); recordingRow.tap()
+        XCTAssertTrue(app.buttons["Rename note"].isEnabled)
+        XCTAssertFalse(app.buttons["Recover note…"].exists)
         XCTAssertTrue(app.buttons["recording-location"].waitForExistence(timeout: 10), "The simulated location must arrive before backgrounding")
         app.navigationBars.buttons["Notes"].tap()
         // The wait gives the encoder enough audio to produce a playable file.
@@ -505,6 +507,37 @@ final class NotesUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Replace note with transcript…"].exists)
         app.terminate(); app.launch(); fixture.tap()
         XCTAssertTrue(app.staticTexts["Original fixture transcript."].waitForExistence(timeout: 5))
+    }
+
+    func testUnfinishedNoteRequiresExplicitRecovery() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let row = app.buttons["note-ios-recovery-fixture"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.label.contains("Unfinished recording"))
+        row.tap()
+        XCTAssertFalse(app.buttons["Rename note"].isEnabled)
+        XCTAssertFalse(app.buttons["Edit note"].isEnabled)
+        XCTAssertFalse(app.buttons["Transcribe…"].isEnabled)
+        XCTAssertFalse(app.buttons["Delete note"].isEnabled)
+        let recover = app.buttons["Recover note…"]
+        XCTAssertTrue(recover.isEnabled)
+        recover.tap()
+        XCTAssertTrue(app.alerts.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Stop it there and let its files sync before recovering")).firstMatch.exists)
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertFalse(app.buttons["Delete note"].isEnabled)
+        recover.tap()
+        app.alerts.buttons["Recover note"].tap()
+        XCTAssertTrue(app.buttons["Delete note"].isEnabled)
+        XCTAssertTrue(app.buttons["Rename note"].isEnabled)
+        XCTAssertTrue(app.buttons["Edit note"].isEnabled)
+        XCTAssertTrue(app.buttons["Transcribe…"].isEnabled)
+        XCTAssertFalse(recover.exists)
+        XCTAssertTrue(app.staticTexts["Retained recovery text."].exists)
+        app.terminate(); app.launch()
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.label.contains("Recording interrupted"))
+        deleteNote(row, in: app)
     }
 
 }
