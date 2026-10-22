@@ -75,11 +75,11 @@ import Testing
     defer { try! FileManager.default.removeItem(at: directory) }
     let note = try textFixture(library)
     try library.saveText("Keep my edits", for: note)
+    let metadata = directory.appendingPathComponent("\(note.id).json")
+    defer { try! FileManager.default.setAttributes([.immutable: false], ofItemAtPath: metadata.path) }
     let revision = library.textRevision
     await library.process(ids: [note.id], key: { "fixture" }) { _, _, _ in
-        let metadata = directory.appendingPathComponent("\(note.id).json")
-        try FileManager.default.removeItem(at: metadata)
-        try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: metadata.path)
         return TranscriptionResult(text: "Retained machine result", rawResponse: Data("{}".utf8), milliseconds: 1, requestID: nil)
     }
     #expect(library.issue != nil)
