@@ -146,6 +146,10 @@ final class NotesUITests: XCTestCase {
             await MainActor.run { XCUIApplication().terminate() }
         }
         shortcuts.launch()
+        shortcuts.tabBars.buttons["Shortcuts"].tap()
+        let back = shortcuts.navigationBars.buttons["Shortcuts"]
+        if back.exists { back.tap() }
+        shortcuts.buttons["Sotto"].tap()
         for _ in 0..<3 {
             app.terminate()
             shortcuts.activate()
