@@ -1,6 +1,6 @@
 Sotto v0.1.15 improves note loading, recording reliability and editing.
 
-- Earlier notes appear as JSON metadata loads. Opening history does not read audio or transcript contents; note text loads when opened and machine output loads when expanded.
+- On iPhone and iPad, earlier notes appear as JSON metadata loads. Opening history does not read audio or transcript contents; note text loads when opened and machine output loads when expanded.
 - Refreshing reads current files without rewriting unfinished recordings. Editing and transcription preserve newer metadata changes and report conflicts; failed saves keep your draft.
 - Recover unfinished notes explicitly after stopping work on other devices and allowing files to sync. Saved audio and text are retained.
 - Older audio callbacks and cancelled stop tasks cannot stop a newer recording. Successful saves without a transcription key are shown as saved, including when stopping through the recording Shortcut.
