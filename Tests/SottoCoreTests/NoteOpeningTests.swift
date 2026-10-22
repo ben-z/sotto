@@ -216,17 +216,23 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let archive = try Archive(directory: directory)
-    var note = try fixture(archive, id: "a", status: "complete")
-    note.generatedTitle = "Saved title"
-    try archive.save(note)
-    for ext in ["m4a", "txt", "md"] {
-        try FileManager.default.createDirectory(at: directory.appendingPathComponent("a.\(ext)"), withIntermediateDirectories: false)
+    var generated = try fixture(archive, id: "a", status: "complete")
+    generated.generatedTitle = "Saved title"
+    var renamed = try fixture(archive, id: "b", status: "complete")
+    renamed.title = "Custom title"
+    for note in [generated, renamed] {
+        try archive.save(note)
+        for ext in ["m4a", "txt", "md"] {
+            try FileManager.default.createDirectory(at: directory.appendingPathComponent("\(note.id).\(ext)"), withIntermediateDirectories: false)
+        }
     }
     try Data("not metadata".utf8).write(to: directory.appendingPathComponent("a.response.json"))
     let library = NoteLibrary(archive: archive)
     try await library.loadHistory { _ in }
-    #expect(library.notes.first?.displayTitle == "Saved title")
-    #expect(throws: (any Error).self) { try library.text(for: note) }
+    #expect(Set(library.notes.map(\.displayTitle)) == ["Saved title", "Custom title"])
+    for note in [generated, renamed] {
+        #expect(throws: (any Error).self) { try library.text(for: note) }
+    }
 }
 
 @MainActor @Test func corruptHistoryDoesNotDiscardNewRecording() async throws {
@@ -239,6 +245,26 @@ private func fixture(_ archive: Archive, id: String, status: String) throws -> R
     await #expect(throws: NoteLoadFailure.self) { try await library.loadHistory { _ in } }
     #expect(library.notes.map(\.id) == [recording.id])
     #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(recording.id).json").path))
+}
+
+@MainActor @Test func clearingLegacyTitleReadsTranscriptOnlyWhenRequested() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let archive = try Archive(directory: directory)
+    var note = try fixture(archive, id: "a", status: "complete")
+    note.title = "Custom title"
+    try archive.save(note)
+    let transcript = directory.appendingPathComponent("a.txt")
+    try FileManager.default.createDirectory(at: transcript, withIntermediateDirectories: false)
+    let library = NoteLibrary(archive: archive)
+    try await library.loadHistory { _ in }
+    #expect(throws: NoteLoadFailure.self) { try library.rename(note, to: " ") }
+    #expect(library.notes.first?.displayTitle == "Custom title")
+    try FileManager.default.removeItem(at: transcript)
+    try "The original transcript title".write(to: transcript, atomically: true, encoding: .utf8)
+    try library.rename(note, to: " ")
+    #expect(library.notes.first?.displayTitle == "The original transcript title")
+    #expect(try NoteLibrary(directory: directory).notes.first?.displayTitle == "The original transcript title")
 }
 
 @MainActor @Test func retryStillValidatesMetadataForAlreadyVisibleNotes() async throws {
