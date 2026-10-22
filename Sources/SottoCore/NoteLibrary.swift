@@ -50,16 +50,20 @@ public final class NoteLibrary: ObservableObject {
             for (index, url) in files.enumerated() {
                 try Task.checkCancellation()
                 let id = url.deletingPathExtension().lastPathComponent
+                let note: RecordingRecord?
                 do {
-                    let note = try Self.readRecord(url)
-                    try Task.checkCancellation()
-                    await self.publishHistory(note)
+                    note = try Self.readRecord(url)
                 } catch {
                     try Task.checkCancellation()
                     // A note deleted through this library can disappear during its read.
                     guard await self.deletedDuringHistoryLoad(id) else { throw error }
+                    note = nil
                 }
-                await progress(.reading(loaded: index + 1, total: files.count))
+                try Task.checkCancellation()
+                await MainActor.run {
+                    if let note { self.publishHistory(note) }
+                    progress(.reading(loaded: index + 1, total: files.count))
+                }
             }
             try Task.checkCancellation()
             return ids
