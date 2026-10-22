@@ -139,10 +139,10 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         }
     }
 
-    @objc nonisolated private func audioInterrupted(_ notification: Notification) {
+    @objc private func audioInterrupted(_ notification: Notification) {
         guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
-        Task { @MainActor [weak self] in self?.finish(recordingError: nil) }
+        finish(recordingError: nil)
     }
 
     func refreshKey() {
@@ -216,6 +216,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         guard worker == nil else { error = "Audio saved. Wait for the current transcription, then select Transcribe."; return }
         guard keyStored else { error = "Audio saved. Add a Groq key in Settings, then select Transcribe."; return }
         guard UIApplication.shared.applicationState == .active else { error = "Audio saved. Open the note and select Transcribe."; return }
+        error = nil
         worker = Task { [weak self] in
             await library.process(ids: ids, key: { try GroqKeychain.read() }) { url, key, note in
                 try await GroqClient().transcribe(file: url, key: key, model: note.model, language: note.language, prompt: note.prompt)
@@ -320,16 +321,24 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func play(_ note: RecordingRecord) {
         if playingID == note.id { stopPlayback(); return }
-        guard recording == nil, let library else { return }
+        guard !preparing, recording == nil, let library else { return }
         error = nil
         do {
             stopPlayback()
             try AVAudioSession.sharedInstance().setCategory(.playback)
             try AVAudioSession.sharedInstance().setActive(true)
-            let value = try AVAudioPlayer(contentsOf: library.archive.audioURL(note))
-            value.delegate = self
-            guard value.play() else { throw SottoError("This recording could not be played.") }
-            player = value; playingID = note.id
+            do {
+                let value = try AVAudioPlayer(contentsOf: library.archive.audioURL(note))
+                value.delegate = self
+                guard value.play() else { throw SottoError("This recording could not be played.") }
+                player = value; playingID = note.id
+            } catch {
+                do { try AVAudioSession.sharedInstance().setActive(false) }
+                catch let cleanupError {
+                    throw SottoError("\(error.localizedDescription)\nThe audio session could not be deactivated: \(cleanupError.localizedDescription)")
+                }
+                throw error
+            }
         } catch { self.error = error.localizedDescription }
     }
 

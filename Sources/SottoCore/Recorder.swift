@@ -21,16 +21,26 @@ public final class Recorder: NSObject, AVAudioRecorderDelegate {
         try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try AVAudioSession.sharedInstance().setActive(true)
         #endif
-        let value = try AVAudioRecorder(url: url, settings: [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 16000,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: bitRate,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ])
-        value.delegate = self
-        guard value.record() else { throw SottoError("Microphone recording could not start at \(url.path).") }
-        recorder = value
+        do {
+            let value = try AVAudioRecorder(url: url, settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 16000,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: bitRate,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            ])
+            value.delegate = self
+            guard value.record() else { throw SottoError("Microphone recording could not start at \(url.path).") }
+            recorder = value
+        } catch {
+            #if os(iOS)
+            do { try AVAudioSession.sharedInstance().setActive(false) }
+            catch let cleanupError {
+                throw SottoError("\(error.localizedDescription)\nThe audio session could not be deactivated: \(cleanupError.localizedDescription)")
+            }
+            #endif
+            throw error
+        }
     }
 
     public func stop() throws -> Double {
