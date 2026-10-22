@@ -195,6 +195,7 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
             deadline = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(maximumSeconds), tolerance: .zero) }
                 catch { return }
+                guard !Task.isCancelled else { return }
                 self?.finish(recordingError: nil)
             }
         } catch {
@@ -216,9 +217,9 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func process(_ ids: Set<String>) {
         guard let library else { return }
-        guard worker == nil else { error = "Audio saved. Wait for the current transcription, then select Transcribe."; return }
-        guard keyStored else { error = "Audio saved. Add a Groq key in Settings, then select Transcribe."; return }
-        guard UIApplication.shared.applicationState == .active else { error = "Audio saved. Open the note and select Transcribe."; return }
+        guard worker == nil else { return }
+        guard keyStored else { return }
+        guard UIApplication.shared.applicationState == .active else { return }
         error = nil
         worker = Task { [weak self] in
             await library.process(ids: ids, key: { try GroqKeychain.read() }) { url, key, note in
@@ -277,9 +278,9 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         guard let request = locationRequests.removeValue(forKey: requestID) else { return }
         request.manager.delegate = nil
         locationMessage = message
-        guard let library, var note = library.notes.first(where: { $0.id == request.noteID }) else { return }
-        note.location = location; note.locationStatus = message
-        do { try library.save(note) } catch { self.error = "Cannot save location: \(error.localizedDescription)" }
+        guard let library else { return }
+        do { try library.updateLocation(location, message: message, for: request.noteID, activeRecordingID: recording?.id) }
+        catch { self.error = "Cannot save location: \(error.localizedDescription)" }
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

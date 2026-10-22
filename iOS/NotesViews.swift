@@ -230,7 +230,7 @@ struct NoteView: View {
             }
             .navigationTitle("Voice note").navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
-                if let error = error ?? store.error {
+                if let error = error ?? store.error ?? library.issue {
                     ErrorBanner(message: error).padding().background(.bar)
                 }
             }

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 // Compile with the production Session, Archive, and Configuration. Only device
 // and service dependencies are fixtures, so the real deadline and save path run.
@@ -68,6 +69,7 @@ struct GroqClient {
         }
         try await currentRecorderCallbackFinishesRecording(in: root)
         try await delayedCallbackPreservesReplacementRecording(in: root)
+        try await cancelledExpiredDeadlinePreservesReplacementRecording(in: root)
         print("Session deadline, callback ownership, and transcript persistence checks passed.")
     }
 
@@ -119,5 +121,35 @@ struct GroqClient {
         guard replacement.status == "recording", replacement.error == nil else {
             throw SottoError("An earlier recorder's delayed callback changed the replacement recording")
         }
+    }
+
+    @MainActor private static func cancelledExpiredDeadlinePreservesReplacementRecording(in root: URL) async throws {
+        var configuration = Configuration(recordingsDirectory: root.path)
+        configuration.maxRecordingSeconds = 1
+        let session = try Session(configuration: configuration)
+        await session.begin()
+        guard session.state == .recording, let originalID = session.activeRecordingID else {
+            throw SottoError("Deadline cancellation fixture did not begin recording")
+        }
+        // Let the queued deadline enter its real sleep, then keep its expired
+        // continuation off the MainActor until the recording has been replaced.
+        await Task { @MainActor in }.value
+        usleep(2_000_000)
+        await session.cancel()
+        await session.begin()
+        guard session.state == .recording, let replacementID = session.activeRecordingID, replacementID != originalID else {
+            throw SottoError("Deadline cancellation fixture did not replace the recording")
+        }
+        await Task { @MainActor in }.value
+        guard session.state == .recording, session.activeRecordingID == replacementID else {
+            throw SottoError("An earlier recording's cancelled expired deadline stopped the replacement recording")
+        }
+        let data = try Data(contentsOf: root.appendingPathComponent("\(replacementID).json"))
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let replacement = try decoder.decode(RecordingRecord.self, from: data)
+        guard replacement.status == "recording", replacement.error == nil else {
+            throw SottoError("An earlier recording's cancelled expired deadline changed the replacement metadata")
+        }
+        await session.cancel()
     }
 }
