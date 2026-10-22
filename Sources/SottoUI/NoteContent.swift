@@ -21,6 +21,7 @@ private struct LoadedText<Value> {
 /// Both apps expose the edited note and the latest machine output through these controls.
 public struct NoteContent: View {
     @ObservedObject private var library: NoteLibrary
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private let id: String
     private let canEdit: Bool
     private let editingChanged: (Bool) -> Void
@@ -109,7 +110,9 @@ public struct NoteContent: View {
         case .success(let text):
             if text.isEmpty { Text("No note text yet.").foregroundStyle(.secondary) }
             else { Text(text).textSelection(.enabled) }
-            HStack {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())
+            layout {
                 ShareLink("Share note", item: text).disabled(text.isEmpty)
                 Button("Edit note", systemImage: "square.and.pencil") {
                     draft = text; error = nil; editing = true
