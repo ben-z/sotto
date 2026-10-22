@@ -91,6 +91,7 @@ public final class NoteLibrary: ObservableObject {
         guard id != activeRecordingID, id != transcribingID else {
             throw SottoError("Stop this recording or transcription before recovering the note.")
         }
+        defer { invalidateText() }
         let url = archive.directory.appendingPathComponent("\(id).json")
         var note = try Self.readRecord(url)
         guard note.hasUnfinishedOperation else {
