@@ -204,6 +204,7 @@ private struct RecordingDetail: View {
             }
             ScrollView {
                 NoteContent(library: library, id: note.id, canEdit: !model.busy && !note.hasUnfinishedOperation) { model.editing = $0 }
+                    .id(note.id)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

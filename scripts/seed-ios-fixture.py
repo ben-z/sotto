@@ -47,3 +47,11 @@ record.update(id=identifier, title="Unfinished fixture", status="recording", aud
 shutil.copyfile(fixture, library / record["audioFile"])
 (library / f"{identifier}.json").write_text(json.dumps(record))
 (library / f"{identifier}.md").write_text("Retained recovery text.")
+
+identifier = "ios-unreadable-text-fixture"
+record = json.loads((library / "ios-ui-fixture.json").read_text())
+record.update(id=identifier, title="Unreadable edited note", audioFile=f"{identifier}.m4a")
+shutil.copyfile(fixture, library / record["audioFile"])
+(library / f"{identifier}.json").write_text(json.dumps(record))
+(library / f"{identifier}.md").write_bytes(bytes([0xff]))
+(library / f"{identifier}.txt").write_text("Recoverable machine transcript.")

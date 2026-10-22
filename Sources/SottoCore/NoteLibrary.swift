@@ -8,12 +8,16 @@ public final class NoteLibrary: ObservableObject {
     @Published public private(set) var notes: [RecordingRecord] = []
     @Published public private(set) var transcribingID: String?
     @Published public private(set) var issue: String?
+    @Published public private(set) var textRevision = 0
     public let archive: Archive
     private let log = Logger(subsystem: "dev.sotto.notes", category: "queue")
     // Live edits and deletions take precedence over the history snapshot.
     private var historyChanges: Set<String>?
 
     public init(archive: Archive) { self.archive = archive }
+
+    /// Visible notes reread their text after local writes or an explicit folder refresh.
+    public func invalidateText() { textRevision += 1 }
 
     public convenience init(directory: URL) throws {
         self.init(archive: try Archive(directory: directory))
@@ -22,6 +26,7 @@ public final class NoteLibrary: ObservableObject {
 
     public func reload() throws {
         notes = try Self.readRecords(archive: archive)
+        invalidateText()
     }
 
     public func reloadAsync() async throws {
@@ -29,6 +34,7 @@ public final class NoteLibrary: ObservableObject {
         notes = try await Task.detached {
             try Self.readRecords(archive: archive)
         }.value
+        invalidateText()
     }
 
     /// Publish each validated saved note without changing its files, preserving live changes.
@@ -238,7 +244,7 @@ public final class NoteLibrary: ObservableObject {
         }
     }
 
-    public func text(for note: RecordingRecord) throws -> String {
+    nonisolated public func text(for note: RecordingRecord) throws -> String {
         for ext in ["md", "txt"] {
             let url = archive.directory.appendingPathComponent("\(note.id).\(ext)")
             if FileManager.default.fileExists(atPath: url.path) { return try String(contentsOf: url, encoding: .utf8) }
@@ -246,15 +252,15 @@ public final class NoteLibrary: ObservableObject {
         return ""
     }
 
-    public func hasEditedText(for note: RecordingRecord) -> Bool {
+    nonisolated public func hasEditedText(for note: RecordingRecord) -> Bool {
         FileManager.default.fileExists(atPath: archive.directory.appendingPathComponent("\(note.id).md").path)
     }
 
-    public func hasMachineTranscript(for note: RecordingRecord) -> Bool {
+    nonisolated public func hasMachineTranscript(for note: RecordingRecord) -> Bool {
         FileManager.default.fileExists(atPath: archive.directory.appendingPathComponent("\(note.id).txt").path)
     }
 
-    public func machineTranscript(for note: RecordingRecord) throws -> String {
+    nonisolated public func machineTranscript(for note: RecordingRecord) throws -> String {
         try String(contentsOf: archive.directory.appendingPathComponent("\(note.id).txt"), encoding: .utf8)
     }
 
@@ -262,14 +268,14 @@ public final class NoteLibrary: ObservableObject {
         _ = try editableNotes([note.id])
         _ = try machineTranscript(for: note)
         try FileManager.default.removeItem(at: archive.directory.appendingPathComponent("\(note.id).md"))
-        objectWillChange.send()
+        invalidateText()
     }
 
     public func saveText(_ text: String, for note: RecordingRecord) throws {
         _ = try editableMetadataNote(note.id, activeRecordingID: nil)
         // Keep the machine transcript and raw response when a person edits their note.
         try text.write(to: archive.directory.appendingPathComponent("\(note.id).md"), atomically: true, encoding: .utf8)
-        objectWillChange.send()
+        invalidateText()
     }
 
     public func rename(_ note: RecordingRecord, to title: String, activeRecordingID: String?) throws {
@@ -286,6 +292,8 @@ public final class NoteLibrary: ObservableObject {
         issue = nil
         while let candidate = notes.reversed().first(where: { $0.status == "queued" && (ids == nil || ids!.contains($0.id)) }) {
             if Task.isCancelled { return }
+            // Output files can change even if the final metadata write fails.
+            defer { invalidateText() }
             var note = candidate
             var completed = false
             do {

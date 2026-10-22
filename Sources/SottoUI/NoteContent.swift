@@ -1,6 +1,23 @@
 import SwiftUI
 import SottoCore
 
+private struct TextRequest: Equatable, Sendable {
+    let id: String
+    let revision: Int
+    let status: String
+}
+
+private struct NoteFiles: Sendable {
+    let text: Result<String, Error>
+    let hasEdits: Bool
+    let hasTranscript: Bool
+}
+
+private struct LoadedText<Value> {
+    let request: TextRequest
+    let result: Result<Value, Error>
+}
+
 /// Both apps expose the edited note and the latest machine output through these controls.
 public struct NoteContent: View {
     @ObservedObject private var library: NoteLibrary
@@ -11,6 +28,9 @@ public struct NoteContent: View {
     @State private var replacing = false
     @State private var draft = ""
     @State private var error: String?
+    @State private var transcriptExpanded = false
+    @State private var noteContent: LoadedText<NoteFiles>?
+    @State private var transcript: LoadedText<String>?
 
     public init(library: NoteLibrary, id: String, canEdit: Bool, editingChanged: @escaping (Bool) -> Void) {
         self.library = library; self.id = id; self.canEdit = canEdit; self.editingChanged = editingChanged
@@ -18,40 +38,44 @@ public struct NoteContent: View {
 
     public var body: some View {
         if let note = library.notes.first(where: { $0.id == id }) {
+            let request = TextRequest(id: id, revision: library.textRevision, status: note.status)
+            let files = loadedFiles(for: request)
             VStack(alignment: .leading, spacing: 14) {
                 Text("Note").font(.headline)
-                switch Result(catching: { try library.text(for: note) }) {
-                case .success(let text):
-                    if text.isEmpty { Text("No note text yet.").foregroundStyle(.secondary) }
-                    else { Text(text).textSelection(.enabled) }
-                    HStack {
-                        ShareLink("Share note", item: text).disabled(text.isEmpty)
-                        Button("Edit note", systemImage: "square.and.pencil") {
-                            draft = text; error = nil; editing = true
-                        }.disabled(!canEdit)
-                    }.buttonStyle(.bordered)
-                case .failure(let error): Text(error.localizedDescription).foregroundStyle(.red).textSelection(.enabled)
-                }
+                if let noteContent, noteContent.request == request {
+                    switch noteContent.result {
+                    case .success(let files): noteText(files.text)
+                    case .failure(let error): readError(error).accessibilityIdentifier("note-text-read-error")
+                    }
+                } else { ProgressView("Loading note…") }
                 if let message = note.error { Text(message).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-                if note.transcribedModel != nil || note.status == "complete" || library.hasMachineTranscript(for: note) {
+                if note.transcribedModel != nil || note.status == "complete" || files?.hasTranscript == true {
                     Divider()
                     Text("Model: \(note.transcribedModel ?? note.model)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    DisclosureGroup("Machine transcript") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            switch Result(catching: { try library.machineTranscript(for: note) }) {
-                            case .success(let text):
-                                Text(text).textSelection(.enabled)
-                                ShareLink("Share transcript", item: text)
-                                if library.hasEditedText(for: note) {
-                                    Button("Replace note with transcript…") { replacing = true }.buttonStyle(.bordered).disabled(!canEdit)
-                                }
-                            case .failure(let error): Text(error.localizedDescription).foregroundStyle(.red).textSelection(.enabled)
+                    DisclosureGroup("Machine transcript", isExpanded: $transcriptExpanded) {
+                        if transcriptExpanded {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if let transcript, transcript.request == request {
+                                    switch transcript.result {
+                                    case .success(let text):
+                                        Text(text).textSelection(.enabled)
+                                        ShareLink("Share transcript", item: text)
+                                        if files?.hasEdits == true {
+                                            Button("Replace note with transcript…") { replacing = true }
+                                                .buttonStyle(.bordered).disabled(!canEdit)
+                                        }
+                                    case .failure(let error): readError(error).accessibilityIdentifier("machine-transcript-read-error")
+                                    }
+                                } else { ProgressView("Loading transcript…") }
                             }
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                            .task(id: request) { await loadTranscript(note, request: request) }
+                        }
                     }
                 }
                 if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             }
+            .task(id: request) { await loadNote(note, request: request) }
             .sheet(isPresented: $editing) {
                 NavigationStack {
                     VStack(alignment: .leading) {
@@ -82,6 +106,68 @@ public struct NoteContent: View {
             .onChange(of: editing) { _, value in editingChanged(value) }
             .onDisappear { editingChanged(false) }
         }
+    }
+
+    @ViewBuilder private func noteText(_ result: Result<String, Error>) -> some View {
+        switch result {
+        case .success(let text):
+            if text.isEmpty { Text("No note text yet.").foregroundStyle(.secondary) }
+            else { Text(text).textSelection(.enabled) }
+            HStack {
+                ShareLink("Share note", item: text).disabled(text.isEmpty)
+                Button("Edit note", systemImage: "square.and.pencil") {
+                    draft = text; error = nil; editing = true
+                }.disabled(!canEdit)
+            }.buttonStyle(.bordered)
+        case .failure(let error): readError(error).accessibilityIdentifier("note-text-read-error")
+        }
+    }
+
+    private func readError(_ error: Error) -> some View {
+        Text(error.localizedDescription).foregroundStyle(.red).textSelection(.enabled)
+    }
+
+    private func loadedFiles(for request: TextRequest) -> NoteFiles? {
+        guard let noteContent, noteContent.request == request else { return nil }
+        switch noteContent.result {
+        case .success(let files): return files
+        case .failure: return nil
+        }
+    }
+
+    private func currentRequest() -> TextRequest? {
+        guard let note = library.notes.first(where: { $0.id == id }) else { return nil }
+        return TextRequest(id: id, revision: library.textRevision, status: note.status)
+    }
+
+    private func loadNote(_ note: RecordingRecord, request: TextRequest) async {
+        let library = library
+        let result = await read {
+            let text = Result { try library.text(for: note) }
+            try Task.checkCancellation()
+            return NoteFiles(text: text, hasEdits: library.hasEditedText(for: note), hasTranscript: library.hasMachineTranscript(for: note))
+        }
+        guard !Task.isCancelled, currentRequest() == request else { return }
+        noteContent = LoadedText(request: request, result: result)
+    }
+
+    private func loadTranscript(_ note: RecordingRecord, request: TextRequest) async {
+        let library = library
+        let result = await read { try library.machineTranscript(for: note) }
+        guard !Task.isCancelled, transcriptExpanded, currentRequest() == request else { return }
+        transcript = LoadedText(request: request, result: result)
+    }
+
+    private func read<Value: Sendable>(_ operation: @escaping @Sendable () throws -> Value) async -> Result<Value, Error> {
+        let worker = Task.detached {
+            Result {
+                try Task.checkCancellation()
+                return try operation()
+            }
+        }
+        return await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: { worker.cancel() }
     }
 }
 
