@@ -139,10 +139,10 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
         }
     }
 
-    @objc nonisolated private func audioInterrupted(_ notification: Notification) {
+    @objc private func audioInterrupted(_ notification: Notification) {
         guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
-        Task { @MainActor [weak self] in self?.finish(recordingError: nil) }
+        finish(recordingError: nil)
     }
 
     func refreshKey() {
