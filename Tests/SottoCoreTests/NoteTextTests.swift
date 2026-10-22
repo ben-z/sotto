@@ -15,7 +15,7 @@ import Testing
     defer { try! FileManager.default.removeItem(at: directory) }
     let note = try textFixture(library)
     let original = library.textRevision
-    try library.rename(note, to: "A title")
+    try library.rename(note, to: "A title", activeRecordingID: nil)
     #expect(library.textRevision == original)
     try library.saveText("My saved edits", for: note)
     #expect(library.textRevision == original + 1)
@@ -39,7 +39,7 @@ import Testing
     let history = NoteLibrary(archive: source.archive)
     let original = history.textRevision
     var versions: [Int] = []
-    try await history.loadHistory { _ in versions.append(history.textRevision) }
+    try await history.loadHistory(activeRecordingID: nil) { _ in versions.append(history.textRevision) }
     #expect(history.notes.count == 2)
     #expect(!versions.isEmpty)
     #expect(versions.allSatisfy { $0 == original })

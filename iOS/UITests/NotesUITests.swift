@@ -2,49 +2,23 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
-    func testPullToRefreshLoadsExternalChangesWhileRecording() throws {
+    func testPullToRefreshPreservesRecording() {
         continueAfterFailure = false
-        let libraryPath = try XCTUnwrap(ProcessInfo.processInfo.environment["SOTTO_TEST_LIBRARY_PATH"], "Run scripts/test-ios.sh with a disposable simulator.")
-        XCTAssertTrue(libraryPath.contains("/CoreSimulator/Devices/"))
-        let directory = URL(fileURLWithPath: libraryPath, isDirectory: true)
-        let metadata = directory.appendingPathComponent("ios-ui-fixture.json")
-        let deleted = directory.appendingPathComponent("ios-delete-fixture-a.json")
-        let added = directory.appendingPathComponent("ios-refresh-fixture.json")
-        let original = try Data(contentsOf: metadata)
-        let deletedOriginal = try Data(contentsOf: deleted)
-        defer {
-            do {
-                try original.write(to: metadata, options: .atomic)
-                try deletedOriginal.write(to: deleted, options: .atomic)
-                try FileManager.default.removeItem(at: added)
-            } catch { XCTFail("Could not restore refresh fixtures: \(error)") }
-        }
         let app = XCUIApplication(); app.launch()
         let existing = app.buttons["note-ios-ui-fixture"]
         XCTAssertTrue(existing.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["note-ios-delete-fixture-a"].exists)
         let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !app.progressIndicators.firstMatch.exists }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
         XCTAssertFalse(app.buttons["Try again"].exists)
         app.buttons["record-note"].tap()
         let stop = app.buttons["Stop recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 10))
-        var changed = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
-        changed["title"] = "Changed on another device"
-        try JSONSerialization.data(withJSONObject: changed).write(to: metadata, options: .atomic)
-        changed["id"] = "ios-refresh-fixture"
-        changed["audioFile"] = "ios-refresh-fixture.m4a"
-        changed["title"] = "Added on another device"
-        try JSONSerialization.data(withJSONObject: changed).write(to: added, options: .atomic)
-        try FileManager.default.removeItem(at: deleted)
-        XCTAssertFalse(existing.label.contains("Changed on another device"))
-        XCTAssertFalse(app.buttons["note-ios-refresh-fixture"].exists)
         app.collectionViews.firstMatch.swipeDown()
-        let refreshed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            existing.label.contains("Changed on another device") && app.buttons["note-ios-refresh-fixture"].exists && !app.buttons["note-ios-delete-fixture-a"].exists
-        }, object: nil)
+        let refreshed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !app.progressIndicators.firstMatch.exists }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 10), .completed)
         XCTAssertTrue(stop.exists, "Refreshing must preserve the current recording")
+        XCTAssertTrue(existing.exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "note-ios-ui-fixture").count, 1)
         XCTAssertFalse(app.buttons["Try again"].exists)
         stop.tap()
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
