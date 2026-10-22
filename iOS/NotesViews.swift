@@ -186,7 +186,7 @@ struct NoteView: View {
                     } else { Text(note.locationStatus ?? "Location not recorded").font(.caption).foregroundStyle(.secondary) }
                     HStack {
                         Button(store.playingID == id ? "Stop playback" : "Play recording", systemImage: store.playingID == id ? "stop.fill" : "play.fill") { store.play(note) }
-                            .disabled(store.recording != nil)
+                            .disabled(store.recording != nil || store.preparing)
                         Spacer()
                         if let seconds = note.durationSeconds { Text(Duration.seconds(seconds), format: .time(pattern: .minuteSecond)).monospacedDigit().foregroundStyle(.secondary) }
                     }

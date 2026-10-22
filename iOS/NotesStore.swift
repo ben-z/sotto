@@ -315,16 +315,24 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func play(_ note: RecordingRecord) {
         if playingID == note.id { stopPlayback(); return }
-        guard recording == nil, let library else { return }
+        guard !preparing, recording == nil, let library else { return }
         error = nil
         do {
             stopPlayback()
             try AVAudioSession.sharedInstance().setCategory(.playback)
             try AVAudioSession.sharedInstance().setActive(true)
-            let value = try AVAudioPlayer(contentsOf: library.archive.audioURL(note))
-            value.delegate = self
-            guard value.play() else { throw SottoError("This recording could not be played.") }
-            player = value; playingID = note.id
+            do {
+                let value = try AVAudioPlayer(contentsOf: library.archive.audioURL(note))
+                value.delegate = self
+                guard value.play() else { throw SottoError("This recording could not be played.") }
+                player = value; playingID = note.id
+            } catch {
+                do { try AVAudioSession.sharedInstance().setActive(false) }
+                catch let cleanupError {
+                    throw SottoError("\(error.localizedDescription)\nThe audio session could not be deactivated: \(cleanupError.localizedDescription)")
+                }
+                throw error
+            }
         } catch { self.error = error.localizedDescription }
     }
 

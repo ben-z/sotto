@@ -14,6 +14,10 @@ xcrun simctl privacy "$device" grant microphone dev.sotto.notes
 container="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
 python3 scripts/seed-ios-fixture.py "$container"
 result="${SOTTO_IOS_RESULT_PATH:-work/ios-tests-$(date -u +%Y%m%dT%H%M%SZ).xcresult}"
+xcodebuild "${build[@]}" "${testOptions[@]}" \
+  -resultBundlePath "${result%.xcresult}-playback-recovery.xcresult" \
+  -only-testing:SottoUITests/NotesUITests/testCorruptAudioDoesNotBlockPlaybackOrRecording test-without-building
+container="$(xcrun simctl get_app_container "$device" dev.sotto.notes data)"
 # A directory with a metadata filename produces a real read error.
 unreadableFixture="$container/Documents/Recordings/000-unreadable.json"
 mkdir "$unreadableFixture"
@@ -48,6 +52,7 @@ xcodebuild "${build[@]}" -test-timeouts-enabled YES \
   -resultBundlePath "${result%.xcresult}-recording-limit.xcresult" \
   -only-testing:SottoUITests/NotesUITests/testRecordingLimitPersistsAndStopsAtCapturedDeadline test-without-building
 xcodebuild "${build[@]}" "${testOptions[@]}" \
+  -skip-testing:SottoUITests/NotesUITests/testCorruptAudioDoesNotBlockPlaybackOrRecording \
   -skip-testing:SottoUITests/NotesUITests/testUnreadableNoteDoesNotBlockRecording \
   -skip-testing:SottoUITests/NotesUITests/testBackToBackRecordingsKeepTheirLocations \
   -skip-testing:SottoUITests/NotesUITests/testRecordEditAndRecoverWithoutKey \

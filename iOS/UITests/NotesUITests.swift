@@ -10,6 +10,47 @@ final class NotesUITests: XCTestCase {
         XCTAssertFalse(app.buttons[id].exists)
     }
 
+    func testCorruptAudioDoesNotBlockPlaybackOrRecording() {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let corrupt = app.buttons["note-ios-corrupt-audio-fixture"]
+        XCTAssertTrue(corrupt.waitForExistence(timeout: 10))
+        corrupt.tap()
+        let transcript = app.staticTexts["Original fixture transcript."]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 5))
+        app.buttons["Play recording"].tap()
+        app.swipeUp()
+        let playbackError = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "OSStatus")).firstMatch
+        XCTAssertTrue(playbackError.waitForExistence(timeout: 5), "Corrupt audio must report its decoder error: \(app.debugDescription)")
+        XCTAssertFalse(app.buttons["Stop playback"].exists)
+        XCTAssertTrue(app.buttons["Play recording"].isEnabled)
+        let failure = XCTAttachment(screenshot: app.screenshot())
+        failure.name = "Corrupt audio playback failure"; failure.lifetime = .keepAlways; add(failure)
+        app.navigationBars.buttons["Notes"].tap()
+
+        let playable = app.buttons["note-ios-playback-fixture"]
+        XCTAssertTrue(playable.waitForExistence(timeout: 5)); playable.tap()
+        app.buttons["Play recording"].tap()
+        let playing = app.buttons["Stop playback"]
+        XCTAssertTrue(playing.waitForExistence(timeout: 5), "Valid audio must play after corrupt audio fails")
+        playing.tap()
+        XCTAssertTrue(app.buttons["Play recording"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Notes"].tap()
+
+        app.buttons["record-note"].tap()
+        let stop = app.buttons["Stop recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 10), "Recording must start after playback failure")
+        playable.tap()
+        XCTAssertFalse(app.buttons["Play recording"].isEnabled, "Playback must stay disabled during recording")
+        app.navigationBars.buttons["Notes"].tap()
+        stop.tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10), "Recording must save after playback failure")
+        deleteNote(saved, in: app)
+        deleteNote(corrupt, in: app)
+        deleteNote(playable, in: app)
+    }
+
     func testRecordingShortcutStartsAfterColdLaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
