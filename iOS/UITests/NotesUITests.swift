@@ -2,29 +2,29 @@ import XCTest
 
 @MainActor
 final class NotesUITests: XCTestCase {
-    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, inNoteList: Bool) {
         let feedback = app.staticTexts["error-summary"]
-        let record = app.buttons["record-note"]
+        let recordTop = inNoteList ? app.buttons["record-note"].frame.minY : nil
         let navigation = app.navigationBars.firstMatch
         // XCTest can report controls covered by navigation or a fixed footer as hittable.
         if element.exists && element.frame.minY < navigation.frame.maxY {
             app.swipeDown()
         } else if !element.isHittable || (feedback.exists && element.frame.maxY > feedback.frame.minY)
-            || (record.exists && element.frame.maxY > record.frame.minY) {
+            || (recordTop.map { element.frame.maxY > $0 } == true) {
             app.swipeUp()
         }
         XCTAssertTrue(element.isHittable)
         XCTAssertGreaterThanOrEqual(element.frame.minY, navigation.frame.maxY)
         if feedback.exists { XCTAssertLessThanOrEqual(element.frame.maxY, feedback.frame.minY) }
-        if record.exists { XCTAssertLessThanOrEqual(element.frame.maxY, record.frame.minY) }
+        if let recordTop { XCTAssertLessThanOrEqual(element.frame.maxY, recordTop) }
     }
 
     private func deleteNote(_ row: XCUIElement, in app: XCUIApplication) {
-        reveal(row, in: app)
+        reveal(row, in: app, inNoteList: true)
         let id = row.identifier
         row.tap()
         let delete = app.buttons["Delete note"]
-        reveal(delete, in: app)
+        reveal(delete, in: app, inNoteList: false)
         delete.tap()
         app.buttons["Delete permanently"].tap()
         XCTAssertFalse(app.buttons[id].exists)
@@ -35,7 +35,7 @@ final class NotesUITests: XCTestCase {
         let app = XCUIApplication(); app.launch()
         let corrupt = app.buttons["note-ios-corrupt-audio-fixture"]
         XCTAssertTrue(corrupt.waitForExistence(timeout: 10))
-        reveal(corrupt, in: app)
+        reveal(corrupt, in: app, inNoteList: true)
         corrupt.tap()
         let transcript = app.staticTexts["Original fixture transcript."]
         XCTAssertTrue(transcript.waitForExistence(timeout: 5))
@@ -61,7 +61,7 @@ final class NotesUITests: XCTestCase {
 
         let playable = app.buttons["note-ios-playback-fixture"]
         XCTAssertTrue(playable.waitForExistence(timeout: 5))
-        reveal(playable, in: app); playable.tap()
+        reveal(playable, in: app, inNoteList: true); playable.tap()
         app.buttons["Play recording"].tap()
         let playing = app.buttons["Stop playback"]
         XCTAssertTrue(playing.waitForExistence(timeout: 5), "Valid audio must play after corrupt audio fails")
@@ -72,7 +72,7 @@ final class NotesUITests: XCTestCase {
         app.buttons["record-note"].tap()
         let stop = app.buttons["Stop recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 10), "Recording must start after playback failure")
-        reveal(playable, in: app)
+        reveal(playable, in: app, inNoteList: true)
         playable.tap()
         XCTAssertFalse(app.buttons["Play recording"].isEnabled, "Playback must stay disabled during recording")
         app.navigationBars.buttons["Notes"].tap()
