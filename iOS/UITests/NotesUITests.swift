@@ -146,7 +146,7 @@ final class NotesUITests: XCTestCase {
             await MainActor.run { XCUIApplication().terminate() }
         }
         shortcuts.launch()
-        for _ in 0..<3 {
+        for round in 0..<3 {
             app.terminate()
             shortcuts.activate()
             let action = shortcuts.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Record a voice note")).firstMatch
@@ -160,9 +160,17 @@ final class NotesUITests: XCTestCase {
             let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audio saved"))
             let count = saved.count
             Thread.sleep(forTimeInterval: 1)
-            stop.tap()
+            if round == 0 {
+                shortcuts.activate()
+                XCTAssertTrue(action.waitForExistence(timeout: 10), shortcuts.debugDescription)
+                action.tap()
+                XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "The shortcut must return to Sotto to stop and save")
+                app.activate()
+            } else { stop.tap() }
             let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in saved.count == count + 1 }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [added], timeout: 10), .completed)
+            XCTAssertFalse(stop.exists, "Stopping must finish recording")
+            XCTAssertFalse(app.staticTexts["error-summary"].exists, "Saving must not report a recording error")
             deleteNote(saved.firstMatch, in: app)
         }
     }
@@ -464,6 +472,7 @@ final class NotesUITests: XCTestCase {
         let record = app.buttons["record-note"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         enableLocation(in: app)
+        XCTAssertTrue(app.secureTextFields["Groq API key"].exists, "This test requires a simulator without a saved key")
         app.buttons["Done"].tap()
         record.tap()
         let stop = app.buttons["Stop recording"]
@@ -486,8 +495,10 @@ final class NotesUITests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 10), "Recording must survive backgrounding")
         stop.tap()
         XCTAssertTrue(saved.waitForExistence(timeout: 10), "Recording must save without a Groq key")
+        XCTAssertFalse(app.staticTexts["error-summary"].exists, "Saving without a key must not show an error on the note list")
         saved.tap()
         XCTAssertTrue(app.buttons["recording-location"].waitForExistence(timeout: 10), "The simulated location must be saved with the recording")
+        XCTAssertFalse(app.staticTexts["error-summary"].exists, "A saved note must not show a missing-key error in its details")
         app.buttons["Play recording"].tap()
         let playback = app.buttons["Stop playback"]
         XCTAssertTrue(playback.waitForExistence(timeout: 5), "Saved audio must be playable")

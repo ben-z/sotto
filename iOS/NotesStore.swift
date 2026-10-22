@@ -217,9 +217,9 @@ final class NotesStore: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLoc
 
     func process(_ ids: Set<String>) {
         guard let library else { return }
-        guard worker == nil else { error = "Audio saved. Wait for the current transcription, then select Transcribe."; return }
-        guard keyStored else { error = "Audio saved. Add a Groq key in Settings, then select Transcribe."; return }
-        guard UIApplication.shared.applicationState == .active else { error = "Audio saved. Open the note and select Transcribe."; return }
+        guard worker == nil else { return }
+        guard keyStored else { return }
+        guard UIApplication.shared.applicationState == .active else { return }
         error = nil
         worker = Task { [weak self] in
             await library.process(ids: ids, key: { try GroqKeychain.read() }) { url, key, note in
