@@ -31,14 +31,15 @@ final class NotesUITests: XCTestCase {
         let recordTop = inNoteList ? app.buttons["record-note"].frame.minY : nil
         let navigation = app.navigationBars.firstMatch
         // XCTest can report controls covered by navigation or a fixed footer as hittable.
-        if element.exists && element.frame.minY < navigation.frame.maxY {
+        // Shared frame boundaries can differ by one floating-point step.
+        if element.exists && element.frame.minY < navigation.frame.maxY.nextDown {
             app.swipeDown()
         } else if !element.isHittable || (feedback.exists && element.frame.maxY > feedback.frame.minY)
             || (recordTop.map { element.frame.maxY > $0 } == true) {
             app.swipeUp()
         }
         XCTAssertTrue(element.isHittable)
-        XCTAssertGreaterThanOrEqual(element.frame.minY, navigation.frame.maxY)
+        XCTAssertGreaterThanOrEqual(element.frame.minY, navigation.frame.maxY.nextDown)
         if feedback.exists { XCTAssertLessThanOrEqual(element.frame.maxY, feedback.frame.minY) }
         if let recordTop { XCTAssertLessThanOrEqual(element.frame.maxY, recordTop) }
     }
